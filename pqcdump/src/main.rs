@@ -11,7 +11,6 @@ struct Args {
     /// Path to the .pcap file
     #[arg(value_name = "PCAP")]
     pcap: PathBuf,
-
 }
 
 #[derive(RustEmbed)]
@@ -37,47 +36,91 @@ fn load_kex_algos() -> HashMap<String, KexAlgo> {
     return kex_algos;
 }
 
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+struct FlowKey {
+    src: String,
+    dst: String,
+}
+
+#[derive(Debug)]
+struct SshSession {
+    client_kexinit: Option<KexInit>,
+    server_kexinit: Option<KexInit>,
+    negotiated: Option<NegotiatedAlgorithms>,
+}
+
+#[derive(Debug, Clone)]
+struct KexInit {
+    kex_algorithms: Vec<String>,
+}
+
+#[derive(Debug)]
+struct NegotiatedAlgorithms {
+    kex: String,
+}
+
+#[derive(Default)]
+struct HostCapabilities {
+    supported_kex: linked_hash_set::LinkedHashSet<String>,
+}
+
 fn main() {
     let args = Args::parse();
 
     let file_path = &args.pcap;
 
     let mut cap = Capture::from_file(file_path).expect("Failed to open pcap file");
-    let mut ssh_kex_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut sessions: HashMap<FlowKey, SshSession> = HashMap::new();
+    let mut host_caps: HashMap<String, HostCapabilities> = HashMap::new();
 
     while let Ok(packet) = cap.next_packet() {
-        process_packet(&packet, &mut ssh_kex_map);
+        process_packet(&packet, &mut sessions, &mut host_caps);
     }
 
     let kex_algos = load_kex_algos();
 
-    if !ssh_kex_map.is_empty() {
-        println!("\n=== SSH KEXINIT Map ===");
-        for (key, value) in ssh_kex_map {
-            let mut pqc_supported = false;
-            println!("{}", key);
-            for alg in value.iter() {
-                if let Some(algo) =  kex_algos.get(alg) {
-                    log::info!("{} {}", alg, algo.pqc);
-                    if algo.pqc {
-                        pqc_supported = true;
-                    }
-                } else {
-                    log::debug!("Algorithm not found ({})", alg);
+    println!("\n=== Host Capabilities ===");
+    for (host, caps) in &host_caps {
+        println!("{}", host);
+        let mut pqc_supported = false;
+        for alg in &caps.supported_kex {
+            println!("  {}", alg);
+            if let Some(algo) =  kex_algos.get(alg) {
+                log::info!("{} {}", alg, algo.pqc);
+                if algo.pqc {
+                    pqc_supported = true;
                 }
-            }
-            
-            if pqc_supported {
-                println!("PQC Supported")
             } else {
-                println!("No Support")
+                log::debug!("Algorithm not found ({})", alg);
             }
-            println!("\n");
+        }
+        if pqc_supported {
+            println!("PQC Supported")
+        } else {
+            println!("No Support")
+        }
+    }
+
+    println!("\n=== Negotiated Sessions ===");
+    for (flow, session) in &sessions {
+        if let Some(neg) = &session.negotiated {
+            println!("{} -> {} : {}", flow.src, flow.dst, neg.kex);
+            if let Some(algo) =  kex_algos.get(&neg.kex) {
+                log::info!("{} {}", neg.kex, algo.pqc);
+                if algo.pqc {
+                    println!("PQC Supported");
+                } else {
+                    println!("NOT Supported");
+                }
+            } else {
+                log::debug!("Algorithm not found ({})", &neg.kex);
+            }
         }
     }
 }
 
-fn process_packet(packet: &Packet, ssh_kex_map: &mut HashMap<String, Vec<String>>) {
+fn process_packet(packet: &Packet, sessions: &mut HashMap<FlowKey, SshSession>,
+    host_caps: &mut HashMap<String, HostCapabilities>) {
     match SlicedPacket::from_ethernet(&packet) {
 	    Err(value) => log::debug!("Err {:?}", value),
 	    Ok(value) => {
@@ -96,40 +139,111 @@ fn process_packet(packet: &Packet, ssh_kex_map: &mut HashMap<String, Vec<String>
 
 				if payload[5] == 20 {
 					log::debug!("This may be an SSH_MSG_KEXINIT message");
-					
-					if let Some(kex) = parse_ssh_kexinit(payload) {
-						log::debug!("{:#?}", kex);
-						
-						let key = match &value.net {
-							Some(etherparse::NetSlice::Ipv4(ipv4)) => {
-								format!("{}:{}",
-									ipv4.header().source_addr(),
-									tcp.source_port())
-							}
-							Some(etherparse::NetSlice::Ipv6(ipv6)) => {
-								format!("{}:{}",
-									ipv6.header().source_addr(),
-									tcp.source_port())
-							}
-							_ => "unknown:0".to_string(),
-						};
-						
-                        log::debug!("Storing SSH KEXINIT for key {}", key);
-                        ssh_kex_map.insert(key, kex);
-						
-					} else {
-						log::debug!("Failed to parse SSH_MSG_KEXINIT");
-					}
+
+                    let kex = match parse_ssh_kexinit(payload) {
+                        Some(k) => k,
+                        None => return,
+                    };
+
+                    let sliced = match SlicedPacket::from_ethernet(packet) {
+                        Ok(v) => v,
+                        Err(_) => return,
+                    };
+
+                    let tcp = match sliced.transport {
+                        Some(etherparse::TransportSlice::Tcp(ref tcp)) => tcp,
+                        _ => return,
+                    };
+
+                    let (src_ip, dst_ip) = match sliced.net {
+                        Some(etherparse::NetSlice::Ipv4(ipv4)) => (
+                            ipv4.header().source_addr().to_string(),
+                            ipv4.header().destination_addr().to_string(),
+                        ),
+                        Some(etherparse::NetSlice::Ipv6(ipv6)) => (
+                            ipv6.header().source_addr().to_string(),
+                            ipv6.header().destination_addr().to_string(),
+                        ),
+                        _ => return,
+                    };
+
+                    let flow = FlowKey {
+                        src: format!("{}:{}", src_ip, tcp.source_port()),
+                        dst: format!("{}:{}", dst_ip, tcp.destination_port()),
+                    };
+
+                    let reverse_flow = FlowKey {
+                        src: flow.dst.clone(),
+                        dst: flow.src.clone(),
+                    };
+
+                    // Determine if session already exists in forward or reverse direction
+                    let (session, is_forward) = if let Some(s) = sessions.get_mut(&flow) {
+                        (s, true)
+                    } else if let Some(s) = sessions.get_mut(&reverse_flow) {
+                        (s, false)
+                    } else {
+                        let s = sessions.entry(flow.clone()).or_insert(SshSession {
+                            client_kexinit: None,
+                            server_kexinit: None,
+                            negotiated: None,
+                        });
+                        (s, true)
+                    };
+
+                    if is_forward {
+                        if session.client_kexinit.is_none() {
+                            session.client_kexinit = Some(kex.clone());
+                            update_host_caps(host_caps, &src_ip, &kex);
+                        }
+                    } else {
+                        if session.server_kexinit.is_none() {
+                            session.server_kexinit = Some(kex.clone());
+                            update_host_caps(host_caps, &src_ip, &kex);
+                        }
+                    }
+
+                    // Perform negotiation if both present
+                    if session.client_kexinit.is_some()
+                        && session.server_kexinit.is_some()
+                        && session.negotiated.is_none()
+                    {
+                        let client = session.client_kexinit.as_ref().unwrap();
+                        let server = session.server_kexinit.as_ref().unwrap();
+
+                        if let Some(neg) = negotiate(&client.kex_algorithms, &server.kex_algorithms) {
+                            session.negotiated = Some(NegotiatedAlgorithms { kex: neg });
+                        }
+                    }
 				}
             }
         }
     }	
 }
 
+fn negotiate(client: &[String], server: &[String]) -> Option<String> {
+    for alg in client {
+        if server.contains(alg) {
+            return Some(alg.clone());
+        }
+    }
+    None
+}
 
-fn parse_ssh_kexinit(payload: &[u8]) -> Option<Vec<String>> {
-    // First byte should be 20 (SSH_MSG_KEXINIT)
-    if payload.get(5)? != &20 {
+fn update_host_caps(
+    host_caps: &mut HashMap<String, HostCapabilities>,
+    host: &str,
+    kex: &KexInit,
+) {
+    let entry = host_caps.entry(host.to_string()).or_default();
+
+    for alg in &kex.kex_algorithms {
+        entry.supported_kex.insert(alg.clone());
+    }
+}
+
+fn parse_ssh_kexinit(payload: &[u8]) -> Option<KexInit> {
+    if payload.len() < 6 || payload[5] != 20 {
         return None;
     }
 
@@ -138,7 +252,16 @@ fn parse_ssh_kexinit(payload: &[u8]) -> Option<Vec<String>> {
     let _cookie: &[u8; 16] = data.get(..16)?.try_into().ok()?;
     data = &data[16..];
 
-    read_name_list_owned(&mut data)
+    let kex_algorithms = read_name_list_owned(&mut data)?;
+
+    // Skip remaining 9 name-lists
+    for _ in 0..9 {
+        read_name_list_owned(&mut data)?;
+    }
+
+    Some(KexInit {
+        kex_algorithms,
+    })
 }
 
 fn read_name_list_owned(data: &mut &[u8]) -> Option<Vec<String>> {
