@@ -24,6 +24,7 @@ struct Args {
 #[folder = "$CARGO_MANIFEST_DIR/../pqcscan/support"]
 #[include = "kex_algos.json"]
 #[include = "tls_groups.json"]
+#[include = "tls_cipher_suites.json"]
 struct EmbeddedResources;
 
 #[derive(Deserialize, Debug)]
@@ -36,8 +37,6 @@ struct KexAlgo {
     desc: Option<String>,
     href: Option<String>
 }
-
-
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
@@ -55,6 +54,26 @@ pub struct TlsGroup {
     desc: String,
     #[allow(dead_code)] // currently not used
     href: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TlsCipherSuite {
+    #[serde(skip)]
+    pub name: String,
+
+    pub cipher_suite_id: u16,
+
+    #[allow(dead_code)]
+    pub obsolete: bool,
+
+    #[allow(dead_code)]
+    pub insecure: bool,
+
+    #[allow(dead_code)]
+    pub desc: String,
+
+    #[allow(dead_code)]
+    pub href: String,
 }
 
 fn load_kex_algos() -> HashMap<String, KexAlgo> {
@@ -81,6 +100,23 @@ fn load_groups() -> HashMap<u16, TlsGroup> {
     groups_by_id
 }
 
+fn load_cipher_suites() -> HashMap<u16, TlsCipherSuite> {
+    let json_file = EmbeddedResources::get("tls_cipher_suites.json").unwrap();
+    let json_data = std::str::from_utf8(json_file.data.as_ref()).unwrap();
+
+    let suites_by_name: HashMap<String, TlsCipherSuite> =
+        serde_json::from_str(json_data).unwrap();
+
+    let mut suites_by_id = HashMap::new();
+
+    for (name, mut suite) in suites_by_name {
+        suite.name = name;
+        suites_by_id.insert(suite.cipher_suite_id, suite);
+    }
+
+    suites_by_id
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -90,7 +126,7 @@ fn main() {
     
     let mut sessions: HashMap<FlowKey, SshSession> = HashMap::new();
     let mut host_caps: HashMap<String, HostCapabilities> = HashMap::new();
-    let mut tls_ciphers: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut tls_ciphers: HashMap<String, HashSet<u16>> = HashMap::new();
 	let mut keyshare_groups: HashMap<String, HashSet<u16>> = HashMap::new();
 	let mut tls_sessions: HashMap<String, u16> = HashMap::new();
     let mut reassembler = TcpReassembler::new();
@@ -104,6 +140,7 @@ fn main() {
 
     let kex_algos = load_kex_algos();
     let groups = load_groups();
+    let cipher_suites = load_cipher_suites();
 
     println!("\n=== Host Capabilities ===");
     for (host, caps) in &host_caps {
@@ -145,9 +182,17 @@ fn main() {
     }
 
     if !tls_ciphers.is_empty() {
-        log::debug!("\n=== TLS CIPHERS Map ===");
-        for (key, value) in &tls_ciphers {
-            log::debug!("{} => {:?}", key, value);
+       println!("\n=== TLS CIPHERS Map ===");
+        for (key, values) in &tls_ciphers {
+            println!("{}:", key);
+
+            for id in values {
+                if let Some(cipher) = cipher_suites.get(id) {
+                    println!("  {}", cipher.name);
+                } else {
+                    println!("  {} -> UNKNOWN", id);
+                }
+            }
         }
     }
 	
@@ -189,7 +234,7 @@ fn process_packet(packet: &Packet,
     reassembler: &mut TcpReassembler,
     sessions: &mut HashMap<FlowKey, SshSession>,
     host_caps: &mut HashMap<String, HostCapabilities>,
-    tls_ciphers: &mut HashMap<String, HashSet<String>>,
+    tls_ciphers: &mut HashMap<String, HashSet<u16>>,
     keyshare_groups: &mut HashMap<String, HashSet<u16>>,
     tls_sessions: &mut HashMap<String, u16>) {
     match SlicedPacket::from_ethernet(&packet) {

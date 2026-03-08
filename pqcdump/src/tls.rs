@@ -2,7 +2,7 @@ use etherparse::SlicedPacket;
 use std::collections::{HashMap, HashSet};
 
 pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherparse::TcpSlice<'_>,
-    tls_ciphers: &mut HashMap<String, HashSet<String>>, 
+    tls_ciphers: &mut HashMap<String, HashSet<u16>>, 
     keyshare_groups: &mut HashMap<String, HashSet<u16>>,
     tls_sessions: &mut HashMap<String, u16>) {
     // Handshake type at payload[5]
@@ -23,7 +23,7 @@ pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherpa
 
         match parse_ssl_v3_client_hello(payload){
             Ok(result) => {
-            for val in result.cipher_names.iter() {
+            for val in result.ciphers.iter() {
                 tls_ciphers
                     .entry(key.clone())                // use `key` as-is, no iterator suffix
                     .or_insert_with(HashSet::new)          // create Vec<String> if missing
@@ -74,7 +74,7 @@ pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherpa
         match parse_server_hello_v3(payload){
             Ok(result) => {
                 tls_sessions.insert(key2, result.keyshare);
-                for val in result.cipher_names.iter() {
+                for val in result.ciphers.iter() {
                     tls_ciphers
                         .entry(key.clone())                // use `key` as-is, no iterator suffix
                         .or_insert_with(HashSet::new)          // create Vec<String> if missing
@@ -123,8 +123,8 @@ fn parse_ssl_v3_client_hello(data: &[u8]) -> Result<CryptoConfig, String> {
     let mut cipher_suites = Vec::new();
     for _i in (0..cipher_suites_len).step_by(2) {
         let cs = ((data[offset] as u16) << 8) | data[offset + 1] as u16;
-		log::debug!("Cipher Suite {}", cipher_suite_name(cs));
-        cipher_suites.push(cipher_suite_name(cs).to_string());	
+		log::debug!("Cipher Suite {}", cs);
+        cipher_suites.push(cs);	
 		offset += 2;
     }
 	
@@ -176,7 +176,7 @@ fn parse_ssl_v3_client_hello(data: &[u8]) -> Result<CryptoConfig, String> {
                 if ks_offset + key_exchange_len > offset + ext_len {
                     return Err("KeyShare key_exchange data too short".to_string());
                 }
-                
+
 				keyshare_groups.push(group);
                 ks_offset += key_exchange_len;
             }
@@ -185,7 +185,7 @@ fn parse_ssl_v3_client_hello(data: &[u8]) -> Result<CryptoConfig, String> {
         offset += ext_len;
     }
 
-    Ok(CryptoConfig{cipher_names: cipher_suites, keyshare_groups:keyshare_groups})
+    Ok(CryptoConfig{ciphers: cipher_suites, keyshare_groups:keyshare_groups})
 }
 
 fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> {
@@ -235,8 +235,7 @@ fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> 
 	
 	// Print cipher suite
 	let cipher_code = u16::from_be_bytes([cipher_suite[0], cipher_suite[1]]);
-	let cipher_name = cipher_suite_name(cipher_code);
-	log::debug!("Cipher Suite: 0x{:04x} ({})", cipher_code, cipher_name);
+	log::debug!("Cipher Suite: 0x{:04x}", cipher_code);
 
     // Compression method (1 byte)
     //let compression_method = payload[pos];
@@ -275,9 +274,9 @@ fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> 
             }
         }
     }
-	let cipher_suites: Vec<String> = vec![cipher_name.to_string()];
+	let cipher_suites: Vec<u16> = vec![cipher_code];
     Ok(SessionConfig {
-        cipher_names: cipher_suites, 
+        ciphers: cipher_suites, 
         keyshare: keyshare.unwrap_or_else(|| {
             log::debug!("Warning: missing keyshare");
             0
@@ -286,64 +285,13 @@ fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> 
 }
 
 struct CryptoConfig {
-    cipher_names: Vec<String>,
+    ciphers: Vec<u16>,
     keyshare_groups: Vec<u16>,
 }
 
 struct SessionConfig {
-    cipher_names: Vec<String>,
+    ciphers: Vec<u16>,
     keyshare: u16,
-}
-
-fn cipher_suite_name(code: u16) -> &'static str {
-    match code {
-        // TLS 1.3 Cipher Suites (RFC 8446)
-        0x1301 => "TLS_AES_128_GCM_SHA256",
-        0x1302 => "TLS_AES_256_GCM_SHA384",
-        0x1303 => "TLS_CHACHA20_POLY1305_SHA256",
-        0x1304 => "TLS_AES_128_CCM_SHA256",
-        0x1305 => "TLS_AES_128_CCM_8_SHA256",
-
-        // TLS 1.2 and earlier
-        0x0000 => "TLS_NULL_WITH_NULL_NULL",
-        0x0001 => "TLS_RSA_WITH_NULL_MD5",
-        0x0002 => "TLS_RSA_WITH_NULL_SHA",
-        0x0004 => "TLS_RSA_WITH_RC4_128_MD5",
-        0x0005 => "TLS_RSA_WITH_RC4_128_SHA",
-        0x000a => "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
-        0x002f => "TLS_RSA_WITH_AES_128_CBC_SHA",
-        0x0035 => "TLS_RSA_WITH_AES_256_CBC_SHA",
-        0x003c => "TLS_RSA_WITH_AES_128_CBC_SHA256",
-        0x003d => "TLS_RSA_WITH_AES_256_CBC_SHA256",
-        0x009c => "TLS_RSA_WITH_AES_128_GCM_SHA256",
-        0x009d => "TLS_RSA_WITH_AES_256_GCM_SHA384",
-
-        // ECDHE
-        0xc009 => "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
-        0xc00a => "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",
-        0xc011 => "TLS_ECDHE_RSA_WITH_RC4_128_SHA",
-        0xc012 => "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
-        0xc013 => "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
-        0xc014 => "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
-        0xc027 => "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
-        0xc028 => "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
-        0xc02f => "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-        0xc030 => "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
-        0xc02b => "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
-        0xc02c => "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
-        0xcca8 => "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
-        0xcca9 => "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
-
-        // DHE
-        0x009e => "TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",
-        0x009f => "TLS_DHE_RSA_WITH_AES_256_GCM_SHA384",
-        0x006b => "TLS_DHE_RSA_WITH_AES_256_CBC_SHA256",
-        0x0067 => "TLS_DHE_RSA_WITH_AES_128_CBC_SHA256",
-
-        // Fallbacks / Deprecated
-        0x5600 => "TLS_FALLBACK_SCSV",
-        _ => "other",
-    }
 }
 
 fn parse_extensions(extensions: &[u8]) -> Vec<KeyShareEntry>{
