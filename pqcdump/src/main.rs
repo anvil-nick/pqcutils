@@ -23,6 +23,7 @@ struct Args {
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/../pqcscan/support"]
 #[include = "kex_algos.json"]
+#[include = "tls_groups.json"]
 struct EmbeddedResources;
 
 #[derive(Deserialize, Debug)]
@@ -36,11 +37,48 @@ struct KexAlgo {
     href: Option<String>
 }
 
+
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct TlsGroup {
+    #[serde(skip)]
+    name: String,
+    group_id: u16,
+    pqc: bool,
+    hybrid: bool,
+    #[allow(dead_code)] // currently not used
+    obsolete: bool,
+    #[allow(dead_code)] // currently not used
+    insecure: bool,
+    #[allow(dead_code)] // currently not used
+    desc: String,
+    #[allow(dead_code)] // currently not used
+    href: String,
+}
+
 fn load_kex_algos() -> HashMap<String, KexAlgo> {
     let json_file = EmbeddedResources::get("kex_algos.json").unwrap();
     let json_data = std::str::from_utf8(json_file.data.as_ref()).unwrap();
     let kex_algos = serde_json::from_str(&json_data).unwrap();
     return kex_algos;
+}
+
+fn load_groups() -> HashMap<u16, TlsGroup> {
+    let json_file = EmbeddedResources::get("tls_groups.json").unwrap();
+    let json_data = std::str::from_utf8(json_file.data.as_ref()).unwrap();
+
+    let groups_by_name: HashMap<String, TlsGroup> =
+        serde_json::from_str(json_data).unwrap();
+
+    let mut groups_by_id = HashMap::new();
+
+    for (name, mut group) in groups_by_name {
+        group.name = name.clone();
+        groups_by_id.insert(group.group_id, group);
+    }
+
+    groups_by_id
 }
 
 fn main() {
@@ -53,8 +91,8 @@ fn main() {
     let mut sessions: HashMap<FlowKey, SshSession> = HashMap::new();
     let mut host_caps: HashMap<String, HostCapabilities> = HashMap::new();
     let mut tls_ciphers: HashMap<String, HashSet<String>> = HashMap::new();
-	let mut keyshare_groups: HashMap<String, HashSet<String>> = HashMap::new();
-	let mut tls_sessions: HashMap<String, String> = HashMap::new();
+	let mut keyshare_groups: HashMap<String, HashSet<u16>> = HashMap::new();
+	let mut tls_sessions: HashMap<String, u16> = HashMap::new();
     let mut reassembler = TcpReassembler::new();
 
     let mut n = 1;
@@ -65,6 +103,7 @@ fn main() {
     }
 
     let kex_algos = load_kex_algos();
+    let groups = load_groups();
 
     println!("\n=== Host Capabilities ===");
     for (host, caps) in &host_caps {
@@ -114,14 +153,16 @@ fn main() {
 	
     if !keyshare_groups.is_empty() {
         println!("\n=== KeyShare Groups Map ===");
-        for (key, value) in &keyshare_groups {
-            println!("{} => {:?}", key, value);
-            let pqc_support = detect_pqc_support(value);
-            if pqc_support != PqcSupport::None {
-                if pqc_support == PqcSupport::Hybrid{
-                    println!("{} supports hybrid", key);
-                } else {
-                    println!("{} supports PQC", key);
+        for (key, values) in &keyshare_groups {
+            for value in values {
+                if let Some(group) = groups.get(value) {
+                    if group.hybrid {
+                        println!("{} supports {} which is hybrid", key, group.name);
+                    } else if group.pqc {
+                        println!("{} supports {} which is pure PQC", key, group.name);
+                    } else {
+                        println!("{} supports {} which is not PQC safe at all", key, group.name);
+                    }
                 }
             }
         }
@@ -130,100 +171,17 @@ fn main() {
     if !tls_sessions.is_empty() {
         println!("\n=== Negotiated TLS Sessions ===");
         for (key, value) in &tls_sessions {
-            println!("{} => {:?}", key, value);
-            let pqc_support = pqc_support(value);
-            if pqc_support != PqcSupport::None {
-                if pqc_support == PqcSupport::Hybrid{
-                    println!("{} supports hybrid", key);
+            if let Some(group) = groups.get(value) {
+                println!("{} -> {}", key, group.name);
+                if group.hybrid {
+                    println!("{} is hybrid", key);
+                } else if group.pqc {
+                    println!("{} is pure PQC", key);
                 } else {
-                    println!("{} supports PQC", key);
+                    println!("{} is not PQC safe at all", key);
                 }
             }
         }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum PqcSupport {
-    None,
-    Hybrid,
-    PurePqc,
-}
-
-pub fn detect_pqc_support(groups: &HashSet<String>) -> PqcSupport {
-    // Pure PQ groups (Kyber / ML-KEM)
-    const PURE_PQ: &[&str] = &[
-        "kyber512", "kyber768", "kyber1024",
-        "mlkem512", "mlkem768", "mlkem1024",
-    ];
-
-    // Hybrid KEM groups
-    const HYBRID_PQ: &[&str] = &[
-        "x25519_kyber512", "x25519_kyber768", "x25519_kyber1024",
-        "secp256r1_kyber512", "secp256r1_kyber768", "secp256r1_kyber1024",
-
-        // New concatenated names used by OpenSSL ≥3.3 / OQS provider
-        "x25519mlkem512", "x25519mlkem768", "x25519mlkem1024",
-        "secp256r1mlkem512", "secp256r1mlkem768", "secp256r1mlkem1024",
-        "X25519MLKEM512", "X25519MLKEM768", "X25519MLKEM1024",
-    ];
-
-    let mut has_pure_pq = false;
-    let mut has_hybrid = false;
-
-    for g in groups {
-        let g = g.as_str();
-        if PURE_PQ.contains(&g) {
-            has_pure_pq = true;
-        }
-        if HYBRID_PQ.contains(&g) {
-            has_hybrid = true;
-        }
-    }
-
-    if has_pure_pq {
-        PqcSupport::PurePqc
-    } else if has_hybrid {
-        PqcSupport::Hybrid
-    } else {
-        PqcSupport::None
-    }
-}
-
-pub fn pqc_support(group: &String) -> PqcSupport {
-    // Pure PQ groups (Kyber / ML-KEM)
-    const PURE_PQ: &[&str] = &[
-        "kyber512", "kyber768", "kyber1024",
-        "mlkem512", "mlkem768", "mlkem1024",
-    ];
-
-    // Hybrid KEM groups
-    const HYBRID_PQ: &[&str] = &[
-        "x25519_kyber512", "x25519_kyber768", "x25519_kyber1024",
-        "secp256r1_kyber512", "secp256r1_kyber768", "secp256r1_kyber1024",
-
-        // New concatenated names used by OpenSSL ≥3.3 / OQS provider
-        "x25519mlkem512", "x25519mlkem768", "x25519mlkem1024",
-        "secp256r1mlkem512", "secp256r1mlkem768", "secp256r1mlkem1024",
-        "X25519MLKEM512", "X25519MLKEM768", "X25519MLKEM1024",
-    ];
-
-    let mut has_pure_pq = false;
-    let mut has_hybrid = false;
-
-    if PURE_PQ.contains(&group.as_str()) {
-        has_pure_pq = true;
-    }
-    if HYBRID_PQ.contains(&group.as_str()) {
-        has_hybrid = true;
-    }
-    
-    if has_pure_pq {
-        PqcSupport::PurePqc
-    } else if has_hybrid {
-        PqcSupport::Hybrid
-    } else {
-        PqcSupport::None
     }
 }
 
@@ -232,8 +190,8 @@ fn process_packet(packet: &Packet,
     sessions: &mut HashMap<FlowKey, SshSession>,
     host_caps: &mut HashMap<String, HostCapabilities>,
     tls_ciphers: &mut HashMap<String, HashSet<String>>,
-    keyshare_groups: &mut HashMap<String, HashSet<String>>,
-    tls_sessions: &mut HashMap<String, String>) {
+    keyshare_groups: &mut HashMap<String, HashSet<u16>>,
+    tls_sessions: &mut HashMap<String, u16>) {
     match SlicedPacket::from_ethernet(&packet) {
 	    Err(value) => log::debug!("Err {:?}", value),
 	    Ok(value) => {

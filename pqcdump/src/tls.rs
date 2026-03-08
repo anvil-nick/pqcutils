@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 
 pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherparse::TcpSlice<'_>,
     tls_ciphers: &mut HashMap<String, HashSet<String>>, 
-    keyshare_groups: &mut HashMap<String, HashSet<String>>,
-    tls_sessions: &mut HashMap<String, String>) {
+    keyshare_groups: &mut HashMap<String, HashSet<u16>>,
+    tls_sessions: &mut HashMap<String, u16>) {
     // Handshake type at payload[5]
     let handshake_type = payload[5];
     if handshake_type == 0x01 {
@@ -147,7 +147,7 @@ fn parse_ssl_v3_client_hello(data: &[u8]) -> Result<CryptoConfig, String> {
         return Err("Data too short for extensions data".to_string());
     }
 
-	let mut keyshare_groups: Vec<String> = Vec::new();
+	let mut keyshare_groups: Vec<u16> = Vec::new();
     let extensions_end = offset + extensions_len;
     while offset + 4 <= extensions_end {
         let ext_type = ((data[offset] as u16) << 8) | data[offset + 1] as u16;
@@ -176,14 +176,8 @@ fn parse_ssl_v3_client_hello(data: &[u8]) -> Result<CryptoConfig, String> {
                 if ks_offset + key_exchange_len > offset + ext_len {
                     return Err("KeyShare key_exchange data too short".to_string());
                 }
-
-                log::debug!(
-                    "KeyShare: group=0x{:04x} ({:?}), key_exchange_len={}",
-                    group,
-                    named_group_name(group),
-                    key_exchange_len
-                );
-				keyshare_groups.push(named_group_name(group).to_string());
+                
+				keyshare_groups.push(group);
                 ks_offset += key_exchange_len;
             }
         }
@@ -256,8 +250,7 @@ fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> 
     let extensions_len = u16::from_be_bytes([payload[pos], payload[pos+1]]) as usize;
     pos += 2;
 
-    let mut keyshare_groups: Vec<String> = Vec::new();
-    let mut keyshare: Option<String> = None;
+    let mut keyshare: Option<u16> = None;
 
     if payload.len() < pos + extensions_len {
         log::debug!("Payload too short for extensions");
@@ -271,8 +264,7 @@ fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> 
                 // no keyshare entries
             }
             [entry] => {
-                let ks = named_group_name(entry.group).to_string();
-                keyshare_groups.push(ks.clone());
+                let ks = entry.group;
                 keyshare = Some(ks);
             }
             _ => {
@@ -288,34 +280,19 @@ fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> 
         cipher_names: cipher_suites, 
         keyshare: keyshare.unwrap_or_else(|| {
             log::debug!("Warning: missing keyshare");
-            String::new()
+            0
         }),
     })
 }
 
 struct CryptoConfig {
     cipher_names: Vec<String>,
-    keyshare_groups: Vec<String>,
+    keyshare_groups: Vec<u16>,
 }
 
 struct SessionConfig {
     cipher_names: Vec<String>,
-    keyshare: String,
-}
-
-fn named_group_name(group: u16) -> String {
-    // Check for GREASE pattern: 0x*a*a
-    if (group >> 8) & 0x0F == 0x0A && (group & 0xFF) & 0x0F == 0x0A {
-        return "GREASE".to_string();
-    }
-    
-    match group {
-        0x001d => "x25519".to_string(),
-        0x0017 => "secp256r1".to_string(),
-        0x0018 => "secp384r1".to_string(),
-        0x11ec => "X25519MLKEM768".to_string(),
-        _ => format!("unknown (dec: {}, hex: 0x{:04x})", group, group),
-    }
+    keyshare: u16,
 }
 
 fn cipher_suite_name(code: u16) -> &'static str {
