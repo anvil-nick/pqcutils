@@ -1,9 +1,10 @@
 use etherparse::SlicedPacket;
-use std::{collections::HashMap};
+use std::collections::{HashMap, HashSet};
 
 pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherparse::TcpSlice<'_>,
-    tls_ciphers: &mut HashMap<String, Vec<String>>, 
-    keyshare_groups: &mut HashMap<String, Vec<String>>) {
+    tls_ciphers: &mut HashMap<String, HashSet<String>>, 
+    keyshare_groups: &mut HashMap<String, HashSet<String>>,
+    tls_sessions: &mut HashMap<String, String>) {
     // Handshake type at payload[5]
     let handshake_type = payload[5];
     if handshake_type == 0x01 {
@@ -25,14 +26,14 @@ pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherpa
             for val in result.cipher_names.iter() {
                 tls_ciphers
                     .entry(key.clone())                // use `key` as-is, no iterator suffix
-                    .or_insert_with(Vec::new)          // create Vec<String> if missing
-                    .push(val.clone());                // append the new value
+                    .or_insert_with(HashSet::new)          // create Vec<String> if missing
+                    .insert(val.clone());                // append the new value
                 }
             for val in result.keyshare_groups.iter() {
                 keyshare_groups
                     .entry(key.clone())               // use the base key only
-                    .or_insert_with(Vec::new)         // create Vec<String> if it doesn’t exist
-                    .push(val.clone()); 
+                    .or_insert_with(HashSet::new)         // create Vec<String> if it doesn’t exist
+                    .insert(val.clone()); 
             }}
             Err(e) => {log::debug!("Error: {}", e); }
         }
@@ -51,20 +52,35 @@ pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherpa
             }
             _ => "unknown:0".to_string(),
         };
+
+        let key2 = match &value.net {
+            Some(etherparse::NetSlice::Ipv4(ipv4)) => {
+                format!("{}->{}:{}",
+                    ipv4.header().destination_addr(),
+                    ipv4.header().source_addr(),
+                    tcp.destination_port()
+                )
+            }
+            Some(etherparse::NetSlice::Ipv6(ipv6)) => {
+                format!("{}->{}:{}",
+                    ipv6.header().destination_addr(),
+                    ipv6.header().source_addr(),
+                    tcp.destination_port()
+                )
+            }
+            _ => "unknown:0".to_string(),
+        };
+        
         match parse_server_hello_v3(payload){
-            Ok(result) => {for val in result.cipher_names.iter() {
+            Ok(result) => {
+                tls_sessions.insert(key2, result.keyshare);
+                for val in result.cipher_names.iter() {
                     tls_ciphers
                         .entry(key.clone())                // use `key` as-is, no iterator suffix
-                        .or_insert_with(Vec::new)          // create Vec<String> if missing
-                        .push(val.clone());                // append the new value
-
-                }
-            for val in result.keyshare_groups.iter() {
-                keyshare_groups
-                    .entry(key.clone())               // use the base key only
-                    .or_insert_with(Vec::new)         // create Vec<String> if it doesn’t exist
-                    .push(val.clone());   
-            }}
+                        .or_insert_with(HashSet::new)          // create Vec<String> if missing
+                        .insert(val.clone());                // append the new value
+                    }
+            }
             Err(e) => {log::debug!("Error: {}", e); }
         }
     }
@@ -178,7 +194,7 @@ fn parse_ssl_v3_client_hello(data: &[u8]) -> Result<CryptoConfig, String> {
     Ok(CryptoConfig{cipher_names: cipher_suites, keyshare_groups:keyshare_groups})
 }
 
-fn parse_server_hello_v3(payload: &[u8]) -> Result<CryptoConfig, &'static str> {
+fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> {
 	log::debug!("Parsing ServerHello {}", payload.len());
     // Basic sanity check
     if payload.len() < 5 + 4 + 38 { // header + handshake header + fixed fields up to session id length
@@ -241,21 +257,40 @@ fn parse_server_hello_v3(payload: &[u8]) -> Result<CryptoConfig, &'static str> {
     pos += 2;
 
     let mut keyshare_groups: Vec<String> = Vec::new();
+    let mut keyshare: Option<String> = None;
 
     if payload.len() < pos + extensions_len {
         log::debug!("Payload too short for extensions");
-        //return;
     } else {
-		let extensions = &payload[pos..pos+extensions_len];
+        let extensions = &payload[pos..pos + extensions_len];
 
-		// Parse extensions for signature schemes
-		let key_share_entries = parse_extensions(extensions);
-        for key_share_entry in key_share_entries {
-            keyshare_groups.push(named_group_name(key_share_entry.group).to_string());
+        let key_share_entries = parse_extensions(extensions);
+
+        match key_share_entries.as_slice() {
+            [] => {
+                // no keyshare entries
+            }
+            [entry] => {
+                let ks = named_group_name(entry.group).to_string();
+                keyshare_groups.push(ks.clone());
+                keyshare = Some(ks);
+            }
+            _ => {
+                eprintln!(
+                    "Error: expected at most one KeyShareEntry, got {}",
+                    key_share_entries.len()
+                );
+            }
         }
-	}
+    }
 	let cipher_suites: Vec<String> = vec![cipher_name.to_string()];
-	Ok(CryptoConfig{cipher_names: cipher_suites, keyshare_groups:keyshare_groups})
+    Ok(SessionConfig {
+        cipher_names: cipher_suites, 
+        keyshare: keyshare.unwrap_or_else(|| {
+            log::debug!("Warning: missing keyshare");
+            String::new()
+        }),
+    })
 }
 
 struct CryptoConfig {
@@ -263,7 +298,17 @@ struct CryptoConfig {
     keyshare_groups: Vec<String>,
 }
 
+struct SessionConfig {
+    cipher_names: Vec<String>,
+    keyshare: String,
+}
+
 fn named_group_name(group: u16) -> String {
+    // Check for GREASE pattern: 0x*a*a
+    if (group >> 8) & 0x0F == 0x0A && (group & 0xFF) & 0x0F == 0x0A {
+        return "GREASE".to_string();
+    }
+    
     match group {
         0x001d => "x25519".to_string(),
         0x0017 => "secp256r1".to_string(),
