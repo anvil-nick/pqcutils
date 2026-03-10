@@ -11,12 +11,15 @@ pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherpa
         log::debug!("ClientHello v3 ???");
         let key = match &value.net {
             Some(etherparse::NetSlice::Ipv4(ipv4)) => {
-                format!("{}:client",
-                    ipv4.header().source_addr())
+                format!("{}:{}",
+                    ipv4.header().source_addr(),
+                    tcp.source_port())
             }
             Some(etherparse::NetSlice::Ipv6(ipv6)) => {
-                format!("{}:client",
-                    ipv6.header().source_addr())
+                format!("{}:{}",
+                    ipv6.header().source_addr(),
+                    tcp.source_port()
+                )
             }
             _ => "unknown:0".to_string(),
         };
@@ -73,7 +76,11 @@ pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherpa
         
         match parse_server_hello_v3(payload){
             Ok(result) => {
-                tls_sessions.insert(key2, result.keyshare);
+                tls_sessions.insert(key2.clone(), result.keyshare);
+                keyshare_groups
+                    .entry(key.clone())               // use the base key only
+                    .or_insert_with(HashSet::new)         // create Vec<String> if it doesn’t exist
+                    .insert(result.keyshare); 
                 for val in result.ciphers.iter() {
                     tls_ciphers
                         .entry(key.clone())                // use `key` as-is, no iterator suffix

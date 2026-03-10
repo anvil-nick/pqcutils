@@ -1,8 +1,9 @@
 use pcap::{Packet};
 use etherparse::{SlicedPacket};
 use std::{collections::HashMap};
+use serde::{Serialize,Deserialize};
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
 pub struct FlowKey {
     src: String,
     dst: String,
@@ -18,7 +19,7 @@ impl FlowKey {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct SshSession {
     client_kexinit: Option<KexInit>,
     server_kexinit: Option<KexInit>,
@@ -31,12 +32,12 @@ impl SshSession {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct KexInit {
     kex_algorithms: Vec<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct NegotiatedAlgorithms {
     kex: String,
 }
@@ -47,7 +48,7 @@ impl NegotiatedAlgorithms {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize, Clone)]
 pub struct HostCapabilities {
     supported_kex: linked_hash_set::LinkedHashSet<String>,
 }

@@ -1,0 +1,75 @@
+{% import "macros.html" as macros %}
+
+<div style="padding: 1rem"></div>
+<h3 class="text-center">Summary</h3>
+<div style="padding: 1rem"></div>
+
+<div class="container">
+    <div class="row row-gap-3 d-flex justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5> Statistics</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>&nbsp;</th>
+                                <th>Total</th>
+                                <th>PQC Supported</th>
+                            </tr>
+                        <tbody>
+                            <tr>
+                            {% if ssh_total_count > 0 %}
+                            <th>SSH Sessions</th>
+                            <td>{{ ssh_total_count }}</td>
+                            <td>{{ ssh_pqc_supported_count }}</td>
+                            </tr>
+                            {% endif %}
+                            {% if tls_total_count > 0 %}
+                            <tr>
+                            <th>TLS Sessions</th>
+                            <td>{{ tls_total_count }}</td>
+                            <td>{{ tls_pqc_supported_count }}</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div style="padding: 1rem"></div>
+
+<div class="container">
+    <div class="row row-gap-3 d-flex justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Scan Statistics</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>Packets</th>
+                                <th>Start</th>
+                                <th>End</th>
+                            </tr>
+                        <tbody>
+
+                                <tr>
+                                <td>{{ packet_count }}</td>
+                                <td>{{ start_time | date(format="%Y-%m-%d %H:%M:%S %Z") }}</td>
+                                <td>{{ end_time | date(format="%Y-%m-%d %H:%M:%S %Z")}}</td>
+                                </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

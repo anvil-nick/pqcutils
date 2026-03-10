@@ -1,16 +1,19 @@
 use pcap::{Capture, Packet};
 use etherparse::{SlicedPacket, TransportSlice};
-use std::collections::HashSet;
+use std::net::SocketAddr;
+use std::collections::{BTreeSet, HashSet};
 use std::{collections::HashMap, path::PathBuf};
-use serde::Deserialize;
+use serde::{Serialize,Deserialize};
 use rust_embed::RustEmbed;
 use clap::Parser;
 use crate::ssh::{FlowKey, SshSession, HostCapabilities};
 use crate::tcp::{TcpReassembler, TcpFlowKey};
+use chrono::{DateTime, TimeZone, Utc};
 
 mod ssh;
 mod tls;
 mod tcp;
+mod report;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -131,20 +134,33 @@ fn main() {
 	let mut tls_sessions: HashMap<String, u16> = HashMap::new();
     let mut reassembler = TcpReassembler::new();
 
-    let mut n = 1;
+    let mut packet_count = 1;
+    let mut start_time: Option<DateTime<Utc>> = None;
+    let mut end_time: DateTime<Utc> = Utc::now();
+
+    
     while let Ok(packet) = cap.next_packet() {
-        log::debug!("{}", n);
+        log::debug!("{}", packet_count);
         process_packet(&packet,  &mut reassembler, &mut sessions, &mut host_caps, &mut tls_ciphers, &mut keyshare_groups, &mut tls_sessions);
-        n = n+ 1;
+        packet_count += 1;
+        if start_time.is_none(){
+            start_time = Some(Utc.timestamp_opt(packet.header.ts.tv_sec.into(), (packet.header.ts.tv_usec * 1000).try_into().unwrap()).unwrap());
+        }
+        end_time = Utc.timestamp_opt(packet.header.ts.tv_sec.into(), (packet.header.ts.tv_usec * 1000).try_into().unwrap()).unwrap();
     }
 
     let kex_algos = load_kex_algos();
     let groups = load_groups();
     let cipher_suites = load_cipher_suites();
 
+    let mut ssh_hosts = BTreeSet::<String>::new();
+    let mut ssh_hosts_pqc = HashMap::<String, String>::new();
+    let mut ssh_sessions_results = HashMap::<String, BTreeSet::<String>>::new();
+
     println!("\n=== Host Capabilities ===");
     for (host, caps) in &host_caps {
         println!("{}", host);
+        ssh_hosts.insert(host.to_string());
         let mut pqc_supported = false;
         for alg in caps.supported_kex() {
             println!("  {}", alg);
@@ -158,22 +174,47 @@ fn main() {
             }
         }
         if pqc_supported {
-            println!("PQC Supported")
+            println!("PQC Supported");
+            ssh_hosts_pqc.insert(host.to_string(), "PQC Supported".to_string());
         } else {
-            println!("No Support")
+            println!("No Support");
+            ssh_hosts_pqc.insert(host.to_string(), "No Support".to_string());
         }
     }
 
     println!("\n=== Negotiated Sessions ===");
+    let mut ssh_pqc_supported_count = 0;
     for (flow, session) in &sessions {
         if let Some(neg) = &session.negotiated() {
+            let source_ip = flow.src().parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
+            
+            ssh_sessions_results.insert(source_ip.clone(), BTreeSet::<String>::new());
             println!("{} -> {} : {}", flow.src(), flow.dst(), neg.kex());
             if let Some(algo) =  kex_algos.get(neg.kex()) {
                 log::info!("{} {}", neg.kex(), algo.pqc);
                 if algo.pqc {
                     println!("PQC Supported");
+                    ssh_pqc_supported_count += 1;
+                    if let Some(set) = ssh_sessions_results.get_mut(&source_ip) {
+                        set.insert(format!(
+                            "{} -> {} : {} ({})",
+                            flow.src(),
+                            flow.dst(),
+                            algo.pqc,
+                            "PQC Supported"
+                        ));
+                    }
                 } else {
                     println!("NOT Supported");
+                    if let Some(set) = ssh_sessions_results.get_mut(&source_ip) {
+                    set.insert(format!(
+                        "{} -> {} : {} ({})",
+                        flow.src(),
+                        flow.dst(),
+                        algo.pqc,
+                        "NOT Supported"
+                    ));
+}
                 }
             } else {
                 log::debug!("Algorithm not found ({})", &neg.kex());
@@ -181,16 +222,36 @@ fn main() {
         }
     }
 
+    let mut tls_hosts = BTreeSet::<String>::new();
+    let mut tls_hosts_ciphers = HashMap::<String, BTreeSet::<String>>::new();
+    let mut tls_hosts_pqc = HashMap::<String, BTreeSet::<String>>::new();
+    let mut tls_sessions_results = HashMap::<String, BTreeSet::<String>>::new();
+
     if !tls_ciphers.is_empty() {
-       println!("\n=== TLS CIPHERS Map ===");
+        println!("\n=== TLS CIPHERS Map ===");
         for (key, values) in &tls_ciphers {
             println!("{}:", key);
-
+            
+            let source_ip = key.parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
+            tls_hosts.insert(source_ip.to_string());
+            tls_hosts_ciphers.insert(source_ip.clone(), BTreeSet::<String>::new());
             for id in values {
                 if let Some(cipher) = cipher_suites.get(id) {
                     println!("  {}", cipher.name);
+                    if let Some(set) = tls_hosts_ciphers.get_mut(&source_ip) {
+                        set.insert(format!(
+                            "{}",
+                            cipher.name)
+                        );
+                    }
                 } else {
                     println!("  {} -> UNKNOWN", id);
+                    if let Some(set) = tls_hosts_ciphers.get_mut(&source_ip) {
+                        set.insert(format!(
+                            "{}",
+                            id)
+                        );
+                    }
                 }
             }
         }
@@ -199,35 +260,112 @@ fn main() {
     if !keyshare_groups.is_empty() {
         println!("\n=== KeyShare Groups Map ===");
         for (key, values) in &keyshare_groups {
+            let source_ip = key.parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
+            tls_hosts_pqc.insert(source_ip.clone(), BTreeSet::<String>::new());
             for value in values {
                 if let Some(group) = groups.get(value) {
+                    let description;
                     if group.hybrid {
-                        println!("{} supports {} which is hybrid", key, group.name);
+                        description = format!("{} supports {} which is hybrid", key, group.name);
                     } else if group.pqc {
-                        println!("{} supports {} which is pure PQC", key, group.name);
+                        description = format!("{} supports {} which is pure PQC", key, group.name);
                     } else {
-                        println!("{} supports {} which is not PQC safe at all", key, group.name);
+                        description = format!("{} supports {} which is not PQC safe at all", key, group.name);
                     }
+                    println!("{}", description);
+                    if let Some(set) = tls_hosts_pqc.get_mut(&source_ip) {
+                        set.insert(description);
+                    }
+                    
                 }
             }
         }
     }
 
+    for (key, set) in &tls_hosts_pqc {
+        println!("Key: {}", key);
+
+        for value in set {
+            println!("  {}", value);
+        }
+    }
+
+
+    let mut tls_pqc_supported_count = 0; 
     if !tls_sessions.is_empty() {
         println!("\n=== Negotiated TLS Sessions ===");
         for (key, value) in &tls_sessions {
+            println!("{}", key);
+            let source_ip = key.split("->").next().unwrap().to_string();
+            tls_sessions_results
+                .entry(source_ip.clone())
+                .or_insert_with(BTreeSet::<String>::new);
             if let Some(group) = groups.get(value) {
                 println!("{} -> {}", key, group.name);
+                let description;
                 if group.hybrid {
-                    println!("{} is hybrid", key);
+                    description = format!("{} is hybrid", key);
+                    tls_pqc_supported_count += 1;
                 } else if group.pqc {
-                    println!("{} is pure PQC", key);
+                    description = format!("{} is pure PQC", key);
+                    tls_pqc_supported_count += 1;
                 } else {
-                    println!("{} is not PQC safe at all", key);
+                    description = format!("{} is not PQC safe at all", key);
                 }
+                println!("{}", description);
+                if let Some(set) = tls_sessions_results.get_mut(&source_ip) {
+                        set.insert(description);
+                    }
             }
         }
     }
+
+    let results: ReportResults = ReportResults {
+        host_caps: host_caps.clone(),
+        tls_ciphers: tls_ciphers,
+        keyshare_groups: keyshare_groups,
+        tls_sessions: tls_sessions.clone(),
+        ssh_total_count: host_caps.len(),
+        ssh_pqc_supported_count: ssh_pqc_supported_count,
+        tls_total_count: tls_sessions.len(),
+        tls_pqc_supported_count: tls_pqc_supported_count,
+        packet_count: packet_count,
+        start_time: start_time.unwrap_or(Utc::now()),
+        end_time: end_time,
+        ssh_hosts: ssh_hosts,
+        ssh_hosts_pqc: ssh_hosts_pqc,
+        ssh_sessions_results: ssh_sessions_results,
+        tls_hosts: tls_hosts,
+        tls_hosts_ciphers: tls_hosts_ciphers,
+        tls_hosts_pqc: tls_hosts_pqc,
+        tls_sessions_results: tls_sessions_results,
+    };
+
+    if let Err(e) = report::generate_report("temp".to_string(), results) {
+        eprintln!("Error generating report: {:#}", e);
+    }    
+}
+
+#[derive(Serialize)]
+struct ReportResults {
+    host_caps: HashMap<String, HostCapabilities>,
+    tls_ciphers: HashMap<String, HashSet<u16>>,
+	keyshare_groups: HashMap<String, HashSet<u16>>,
+	tls_sessions: HashMap<String, u16>,
+    ssh_total_count: usize,
+    ssh_pqc_supported_count: usize,
+    tls_total_count: usize,
+    tls_pqc_supported_count: usize,
+    packet_count: usize,
+    start_time: DateTime<Utc>,
+    end_time: DateTime<Utc>,
+    ssh_hosts: BTreeSet<String>,
+    ssh_hosts_pqc: HashMap<String, String>,
+    ssh_sessions_results: HashMap::<String, BTreeSet::<String>>,
+    tls_hosts: BTreeSet<String>,
+    tls_hosts_ciphers: HashMap::<String, BTreeSet::<String>>,
+    tls_hosts_pqc: HashMap::<String, BTreeSet::<String>>,
+    tls_sessions_results: HashMap::<String, BTreeSet::<String>>,
 }
 
 fn process_packet(packet: &Packet,
@@ -249,6 +387,8 @@ fn process_packet(packet: &Packet,
                 Ok(s) => s,
                 Err(_) => return,
             };
+
+            
 
             let (src_ip, dst_ip) = match sliced.net {
                 Some(etherparse::NetSlice::Ipv4(ipv4)) => (

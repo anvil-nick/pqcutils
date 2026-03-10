@@ -729,6 +729,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "984fb35d06508d1e69fc91050cceba9c0b748f983e6739fa2c7a9237154c52c8"
 dependencies = [
  "linked-hash-map",
+ "serde_core",
 ]
 
 [[package]]
@@ -972,6 +973,7 @@ dependencies = [
 name = "pqcdump"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clap",
  "etherparse",
  "linked_hash_set",
@@ -980,6 +982,7 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "tera",
 ]
 
 [[package]]
