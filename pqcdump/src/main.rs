@@ -428,18 +428,18 @@ fn process_packet(packet: &Packet,
                 return;
             }
 
-            process_packet(&sliced, &payload, sessions, host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
+            process_packet_helper(&sliced, &payload, sessions, host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
 
             // Try a reassembled packet
             if let Some(data) = reassembler.push(key, tcp.sequence_number(), tcp.payload()) { 
                 let payload = &data; 
-                process_packet(&sliced, &payload, sessions, host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
+                process_packet_helper(&sliced, &payload, sessions, host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
             }   
         }
     }	
 }
 
-fn process_packet(sliced: &SlicedPacket, 
+fn process_packet_helper(sliced: &SlicedPacket, 
         payload: &[u8], 
         sessions: &mut HashMap<FlowKey, SshSession>,
         host_caps: &mut HashMap<String, HostCapabilities>,
