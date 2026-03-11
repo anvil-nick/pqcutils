@@ -4,8 +4,6 @@
 <h3 class="text-center">TLS Scan Results</h3>
 <div style="padding: 1rem"></div>
 
-{{ macros::filter_settings(type="tls") }}
-
 {% for hostname in tls_hosts %}
 
   <div class="container {% if has_error %}host_has_error{% endif %} {% if has_pqc %}host_has_pqc{% endif %} {% if has_nonpqc %}host_has_nonpqc{% endif %} ">
@@ -18,13 +16,6 @@
           <h5>{{hostname}}</h5>
         </div>
         <div class="card-body">
-
-            {% set tmp = tls_hosts_ciphers[hostname] %}
-            {% for tmp2 in tmp %}
-              
-              {{tmp2}}<br>  
-              
-            {% endfor %}
 
             {% if tls_hosts_pqc[hostname]%}
                 <h3>Supported Key Exchange</h3>

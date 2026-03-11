@@ -1,10 +1,6 @@
-{% import "macros.html" as macros %}
-
 <div style="padding: 1rem"></div>
 <h3 class="text-center">SSH Scan Results</h3>
 <div style="padding: 1rem"></div>
-
-{{ macros::filter_settings(type="ssh") }}
 
 {% for hostname in ssh_hosts %}
 
