@@ -1,15 +1,16 @@
 use etherparse::SlicedPacket;
 use std::collections::{HashMap, HashSet};
 
-pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherparse::TcpSlice<'_>,
+pub fn process_ssl_hello(sliced: &SlicedPacket<'_>, 
+    payload: &[u8], 
+    tcp: &etherparse::TcpSlice<'_>,
     tls_ciphers: &mut HashMap<String, HashSet<u16>>, 
     keyshare_groups: &mut HashMap<String, HashSet<u16>>,
     tls_sessions: &mut HashMap<String, u16>) {
     // Handshake type at payload[5]
     let handshake_type = payload[5];
-    if handshake_type == 0x01 {
-        log::debug!("ClientHello v3 ???");
-        let key = match &value.net {
+
+    let key = match &sliced.net {
             Some(etherparse::NetSlice::Ipv4(ipv4)) => {
                 format!("{}:{}",
                     ipv4.header().source_addr(),
@@ -23,6 +24,9 @@ pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherpa
             }
             _ => "unknown:0".to_string(),
         };
+
+    if handshake_type == 0x01 {
+        log::debug!("ClientHello v3 ???");
 
         match parse_ssl_v3_client_hello(payload){
             Ok(result) => {
@@ -41,22 +45,9 @@ pub fn process_ssl_hello(value: &SlicedPacket<'_>, payload: &[u8], tcp: &etherpa
             Err(e) => {log::debug!("Error: {}", e); }
         }
       } else if handshake_type == 0x02 {
-        log::debug!("ServerHello v3 ??? ");
-        let key = match &value.net {
-            Some(etherparse::NetSlice::Ipv4(ipv4)) => {
-                format!("{}:{}",
-                    ipv4.header().source_addr(),
-                    tcp.source_port())
-            }
-            Some(etherparse::NetSlice::Ipv6(ipv6)) => {
-                format!("{}:{}",
-                    ipv6.header().source_addr(),
-                    tcp.source_port())
-            }
-            _ => "unknown:0".to_string(),
-        };
+        log::debug!("ServerHello v3 ???");
 
-        let key2 = match &value.net {
+        let key2 = match &sliced.net {
             Some(etherparse::NetSlice::Ipv4(ipv4)) => {
                 format!("{}->{}:{}",
                     ipv4.header().destination_addr(),

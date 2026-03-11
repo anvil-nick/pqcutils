@@ -411,12 +411,10 @@ fn process_packet(packet: &Packet,
                 _ => return,
             };
 
-
             let tcp = match sliced.transport {
                 Some(TransportSlice::Tcp(ref t)) => t,
                 _ => return,
             };
-
 
             let key = TcpFlowKey::new(
                 src_ip,
@@ -430,37 +428,36 @@ fn process_packet(packet: &Packet,
                 return;
             }
 
-            if payload[5] == 20 {                
-                log::debug!("This may be an SSH_MSG_KEXINIT message");
-                ssh::process_ssh(&sliced, &payload, sessions, host_caps);
-            }
-
-            // Check SSLv3+ ClientHello
-            if payload.len() > 5
-                && payload[0] == 0x16
-                && payload[1] == 0x03
-                && (0x00..=0x04).contains(&payload[2])
-            {
-                tls::process_ssl_hello(&sliced, &payload, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
-            }
+            process_packet(&sliced, &payload, sessions, host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
 
             // Try a reassembled packet
             if let Some(data) = reassembler.push(key, tcp.sequence_number(), tcp.payload()) { 
                 let payload = &data; 
-                if payload[5] == 20 {
-                    log::debug!("This may be an SSH_MSG_KEXINIT message");
-                    ssh::process_ssh(&sliced, &payload, sessions, host_caps);
-                }
-
-                // Check SSLv3+ ClientHello
-                if payload.len() > 5
-                    && payload[0] == 0x16
-                    && payload[1] == 0x03
-                    && (0x00..=0x04).contains(&payload[2])
-                {
-                    tls::process_ssl_hello(&sliced, &payload, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
-                }
+                process_packet(&sliced, &payload, sessions, host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
             }   
         }
     }	
+}
+
+fn process_packet(sliced: &SlicedPacket, 
+        payload: &[u8], 
+        sessions: &mut HashMap<FlowKey, SshSession>,
+        host_caps: &mut HashMap<String, HostCapabilities>,
+        tcp: &etherparse::TcpSlice<'_>,
+        tls_ciphers: &mut HashMap<String, HashSet<u16>>, 
+        keyshare_groups: &mut HashMap<String, HashSet<u16>>,
+        tls_sessions: &mut HashMap<String, u16>){
+    if payload[5] == 20 {
+        log::debug!("This may be an SSH_MSG_KEXINIT message");
+        ssh::process_ssh(&sliced, &payload, sessions, host_caps);
+    }
+
+    // Check SSLv3+ ClientHello
+    if payload.len() > 5
+        && payload[0] == 0x16
+        && payload[1] == 0x03
+        && (0x00..=0x04).contains(&payload[2])
+    {
+        tls::process_ssl_hello(&sliced, &payload, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
+    }
 }
