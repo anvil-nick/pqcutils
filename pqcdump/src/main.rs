@@ -197,13 +197,13 @@ fn main() {
                 log::debug!("Algorithm not found ({})", alg);
             }
         }
+        let pqc_support;
         if pqc_supported {
-            log::info!("PQC Supported");
-            ssh_hosts_pqc.insert(host.to_string(), "PQC Supported".to_string());
+            pqc_support = "PQC Supported".to_string();
         } else {
-            log::info!("No Support");
-            ssh_hosts_pqc.insert(host.to_string(), "No Support".to_string());
+            pqc_support = "No Support".to_string();
         }
+        ssh_hosts_pqc.insert(host.to_string(), pqc_support.to_string());
     }
 
     log::info!("\n=== Negotiated Sessions ===");
@@ -404,14 +404,12 @@ fn process_packet(packet: &Packet,
                 Err(_) => return,
             };
 
-            
-
             let (src_ip, dst_ip) = match sliced.net {
-                Some(etherparse::NetSlice::Ipv4(ipv4)) => (
+                Some(etherparse::NetSlice::Ipv4(ref ipv4)) => (
                     ipv4.header().source_addr().to_string(),
                     ipv4.header().destination_addr().to_string(),
                 ),
-                Some(etherparse::NetSlice::Ipv6(ipv6)) => (
+                Some(etherparse::NetSlice::Ipv6(ref ipv6)) => (
                     ipv6.header().source_addr().to_string(),
                     ipv6.header().destination_addr().to_string(),
                 ),
@@ -420,7 +418,7 @@ fn process_packet(packet: &Packet,
 
 
             let tcp = match sliced.transport {
-                Some(TransportSlice::Tcp(t)) => t,
+                Some(TransportSlice::Tcp(ref t)) => t,
                 _ => return,
             };
 
@@ -439,7 +437,7 @@ fn process_packet(packet: &Packet,
 
             if payload[5] == 20 {                
                 log::debug!("This may be an SSH_MSG_KEXINIT message");
-                ssh::process_ssh(packet, &payload, sessions, host_caps);
+                ssh::process_ssh(&sliced, &payload, sessions, host_caps);
             }
 
             // Check SSLv3+ ClientHello
@@ -456,7 +454,7 @@ fn process_packet(packet: &Packet,
                 let payload = &data; 
                 if payload[5] == 20 {
                     log::debug!("This may be an SSH_MSG_KEXINIT message");
-                    ssh::process_ssh(packet, &payload, sessions, host_caps);
+                    ssh::process_ssh(&sliced, &payload, sessions, host_caps);
                 }
 
                 // Check SSLv3+ ClientHello

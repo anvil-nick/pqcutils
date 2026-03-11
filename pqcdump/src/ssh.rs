@@ -1,4 +1,3 @@
-use pcap::{Packet};
 use etherparse::{SlicedPacket};
 use std::{collections::HashMap};
 use serde::{Serialize,Deserialize};
@@ -59,16 +58,11 @@ impl HostCapabilities {
     }
 }
 
-pub fn process_ssh(packet: &Packet, payload: &[u8], sessions: &mut HashMap<FlowKey, SshSession>,
+pub fn process_ssh(sliced: &SlicedPacket, payload: &[u8], sessions: &mut HashMap<FlowKey, SshSession>,
     host_caps: &mut HashMap<String, HostCapabilities>){
     let kex = match parse_ssh_kexinit(payload) {
         Some(k) => k,
         None => return,
-    };
-
-    let sliced = match SlicedPacket::from_ethernet(packet) {
-        Ok(v) => v,
-        Err(_) => return,
     };
 
     let tcp = match sliced.transport {
@@ -76,7 +70,7 @@ pub fn process_ssh(packet: &Packet, payload: &[u8], sessions: &mut HashMap<FlowK
         _ => return,
     };
 
-    let (src_ip, dst_ip) = match sliced.net {
+    let (src_ip, dst_ip) = match &sliced.net {
         Some(etherparse::NetSlice::Ipv4(ipv4)) => (
             ipv4.header().source_addr().to_string(),
             ipv4.header().destination_addr().to_string(),
