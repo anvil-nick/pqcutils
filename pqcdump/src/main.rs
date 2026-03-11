@@ -392,17 +392,12 @@ fn process_packet(packet: &Packet,
     keyshare_groups: &mut HashMap<String, HashSet<u16>>,
     tls_sessions: &mut HashMap<String, u16>) {
     match SlicedPacket::from_ethernet(&packet) {
-	    Err(value) => log::debug!("Err {:?}", value),
-	    Ok(value) => {
-			log::debug!("link: {:?}", value.link);
-			log::debug!("link_exts: {:?}", value.link_exts); // contains vlan & macsec
-			log::debug!("net: {:?}", value.net); // contains ip & arp
-			log::debug!("transport: {:?}", value.transport);			
-
-            let sliced = match SlicedPacket::from_ethernet(packet.data) {
-                Ok(s) => s,
-                Err(_) => return,
-            };
+	    Err(sliced) => log::debug!("Err {:?}", sliced),
+	    Ok(sliced) => {
+			log::debug!("link: {:?}", sliced.link);
+			log::debug!("link_exts: {:?}", sliced.link_exts); // contains vlan & macsec
+			log::debug!("net: {:?}", sliced.net); // contains ip & arp
+			log::debug!("transport: {:?}", sliced.transport);			
 
             let (src_ip, dst_ip) = match sliced.net {
                 Some(etherparse::NetSlice::Ipv4(ref ipv4)) => (
@@ -446,7 +441,7 @@ fn process_packet(packet: &Packet,
                 && payload[1] == 0x03
                 && (0x00..=0x04).contains(&payload[2])
             {
-                tls::process_ssl_hello(&value, &payload, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
+                tls::process_ssl_hello(&sliced, &payload, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
             }
 
             // Try a reassembled packet
@@ -463,7 +458,7 @@ fn process_packet(packet: &Packet,
                     && payload[1] == 0x03
                     && (0x00..=0x04).contains(&payload[2])
                 {
-                    tls::process_ssl_hello(&value, &payload, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
+                    tls::process_ssl_hello(&sliced, &payload, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
                 }
             }   
         }
