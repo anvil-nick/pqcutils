@@ -16,11 +16,33 @@ mod tcp;
 mod report;
 
 #[derive(Parser, Debug)]
-#[command(author, version, about)]
+#[command(
+    name = "pqcdump",
+    author = "Anvil Secure Inc",
+    version,
+    about = "Post-Quantum Cryptography PCAP Scanner",
+    long_about = "pqcdump analyzes PCAP files and identifies hosts and established \
+sessions to determine whether Post-Quantum Cryptography (PQC) algorithms are used \
+or supported in TLS and SSH handshakes.",
+    after_help = "pqcdump is free BSD-licensed software by Anvil Secure Inc (https://anvilsecure.com)."
+)]
 struct Args {
-    /// Path to the .pcap file
-    #[arg(value_name = "PCAP")]
+    /// Input PCAP file to analyze
+    ///
+    /// The PCAP should contain TLS or SSH traffic to analyze for post-quantum cryptographic algorithm support.
+    #[arg(
+        value_name = "PCAP file"
+    )]
     pcap: PathBuf,
+
+    /// Output HTML results file
+    ///
+    /// The generated file will contain identified hosts, sessions, and detected PQC capabilities.
+    #[arg(
+        value_name = "Output file path",
+        default_value = "results.html"
+    )]
+    output: PathBuf,
 }
 
 #[derive(RustEmbed)]
@@ -121,6 +143,8 @@ fn load_cipher_suites() -> HashMap<u16, TlsCipherSuite> {
 }
 
 fn main() {
+
+    
     let args = Args::parse();
 
     let file_path = &args.pcap;
@@ -337,7 +361,7 @@ fn main() {
         tls_sessions_results: tls_sessions_results,
     };
 
-    if let Err(e) = report::generate_report("temp".to_string(), results) {
+    if let Err(e) = report::generate_report(&args.output, results) {
         eprintln!("Error generating report: {:#}", e);
     }    
 }

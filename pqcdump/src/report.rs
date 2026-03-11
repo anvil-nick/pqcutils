@@ -2,14 +2,14 @@ use rust_embed::RustEmbed;
 use tera::{Context, Tera};
 use std::fs::File;
 use chrono::prelude::*;
-
+use std::path::Path;
 use crate::ReportResults;
 
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/support/templates/"]
 struct EmbeddedResources;
 
-pub fn generate_report(output_file: String, results: ReportResults) -> Result<(), Box<dyn std::error::Error>>
+pub fn generate_report(output_file: &Path, results: ReportResults) -> Result<(), Box<dyn std::error::Error>>
 {
     let templates = [
         "macros.html",
@@ -34,10 +34,10 @@ pub fn generate_report(output_file: String, results: ReportResults) -> Result<()
 
     log::trace!("Tera Template: {:?}", ctx);
 
-    log::debug!("Rendering HTML report to {}", output_file);
+    log::debug!("Rendering HTML report to {}", output_file.display());
     let f = File::create(&output_file)?;
     tera.render_to("template.html", &ctx, f)?;
-    log::info!("HTML report written to {}", output_file);
+    log::info!("HTML report written to {}", output_file.display());
 
     Ok(())
 }
