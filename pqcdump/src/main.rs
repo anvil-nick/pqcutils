@@ -179,7 +179,7 @@ fn main() {
 
     let mut ssh_hosts = BTreeSet::<String>::new();
     let mut ssh_hosts_pqc = HashMap::<String, String>::new();
-    let mut ssh_sessions_results = HashMap::<String, BTreeSet::<String>>::new();
+    let mut ssh_sessions_results = HashMap::<String, HashSet::<SshSessionResult>>::new();
 
     log::info!("\n=== Host Capabilities ===");
     for (host, caps) in &host_caps {
@@ -211,34 +211,32 @@ fn main() {
     for (flow, session) in &sessions {
         if let Some(neg) = &session.negotiated() {
             let source_ip = flow.src().parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
+
+            //let socket = dest.parse::<std::net::SocketAddr>().expect("invalid socket address");
+            let destination_ip = flow.dst().parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
+            let destination_port = flow.dst().parse::<SocketAddr>().expect("invalid socket address").port();
             
-            ssh_sessions_results.insert(source_ip.clone(), BTreeSet::<String>::new());
+            ssh_sessions_results.insert(source_ip.clone(), HashSet::<SshSessionResult>::new());
             log::info!("{} -> {} : {}", flow.src(), flow.dst(), neg.kex());
             if let Some(algo) =  kex_algos.get(neg.kex()) {
                 log::info!("{} {}", neg.kex(), algo.pqc);
+                let description;
                 if algo.pqc {
                     log::info!("PQC Supported");
                     ssh_pqc_supported_count += 1;
-                    if let Some(set) = ssh_sessions_results.get_mut(&source_ip) {
-                        set.insert(format!(
-                            "{} -> {} : {} ({})",
-                            flow.src(),
-                            flow.dst(),
-                            neg.kex(),
-                            "PQC Supported"
-                        ));
-                    }
+                    description = "PQC Supported";
                 } else {
                     log::info!("NOT Supported");
-                    if let Some(set) = ssh_sessions_results.get_mut(&source_ip) {
-                    set.insert(format!(
-                        "{} -> {} : {} ({})",
-                        flow.src(),
-                        flow.dst(),
-                        neg.kex(),
-                        "NOT Supported"
-                    ));
-}
+                    description = "PQC NOT Supported";
+                } 
+                if let Some(set) = ssh_sessions_results.get_mut(&source_ip) {
+                    let session_result = SshSessionResult::new(
+                        source_ip,
+                        destination_ip,
+                        destination_port,
+                        description.to_string(),
+                    );
+                    set.insert(session_result);
                 }
             } else {
                 log::debug!("Algorithm not found ({})", &neg.kex());
@@ -388,7 +386,7 @@ struct ReportResults {
     host_caps: HashMap<String, HostCapabilities>,
     ssh_hosts: BTreeSet<String>,
     ssh_hosts_pqc: HashMap<String, String>,
-    ssh_sessions_results: HashMap::<String, BTreeSet::<String>>,
+    ssh_sessions_results: HashMap::<String, HashSet::<SshSessionResult>>,
     tls_hosts: BTreeSet<String>,
     tls_hosts_pqc: HashMap::<String, BTreeSet::<String>>,
     tls_sessions_results: HashMap::<String, HashSet::<TlsSessionResult>>,
@@ -402,7 +400,21 @@ struct TlsSessionResult {
     pqc_status: String,
 }
 
+#[derive(Serialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
+struct SshSessionResult {
+    source: String,
+    destination: String,
+    port: u16,
+    pqc_status: String,
+}
+
 impl TlsSessionResult {
+    pub fn new(source: String, destination: String, port: u16, pqc_status: String ) -> Self {
+        Self { source, port, destination, pqc_status }
+    }
+}
+
+impl SshSessionResult {
     pub fn new(source: String, destination: String, port: u16, pqc_status: String ) -> Self {
         Self { source, port, destination, pqc_status }
     }
