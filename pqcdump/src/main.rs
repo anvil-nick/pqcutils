@@ -249,7 +249,7 @@ fn main() {
     let mut tls_hosts = BTreeSet::<String>::new();
     let mut tls_hosts_ciphers = HashMap::<String, BTreeSet::<String>>::new();
     let mut tls_hosts_pqc = HashMap::<String, BTreeSet::<String>>::new();
-    let mut tls_sessions_results = HashMap::<String, BTreeSet::<String>>::new();
+    let mut tls_sessions_results = HashMap::<String, HashSet::<TlsSessionResult>>::new();
 
     if !tls_ciphers.is_empty() {
         log::info!("\n=== TLS CIPHERS Map ===");
@@ -320,26 +320,36 @@ fn main() {
         log::info!("\n=== Negotiated TLS Sessions ===");
         for (key, value) in &tls_sessions {
             log::info!("{}", key);
-            let source_ip = key.split("->").next().unwrap().to_string();
+            let (source_ip, dest) = key.split_once("->").unwrap(); 
+            let source_ip = source_ip.to_string();
+            let socket = dest.parse::<std::net::SocketAddr>().expect("invalid socket address");
+            let destination_ip = socket.ip().to_string();
+            let destination_port = socket.port();
             tls_sessions_results
                 .entry(source_ip.clone())
-                .or_insert_with(BTreeSet::<String>::new);
+                .or_insert_with(HashSet::<TlsSessionResult>::new);
             if let Some(group) = groups.get(value) {
                 log::info!("{} -> {}", key, group.name);
                 let description;
                 if group.hybrid {
-                    description = format!("{} is hybrid", key);
+                    description = "hybrid";
                     tls_pqc_supported_count += 1;
                 } else if group.pqc {
-                    description = format!("{} is pure PQC", key);
+                    description = "full";
                     tls_pqc_supported_count += 1;
                 } else {
-                    description = format!("{} is not PQC safe at all", key);
+                    description = "none";
                 }
                 log::info!("{}", description);
                 if let Some(set) = tls_sessions_results.get_mut(&source_ip) {
-                        set.insert(description);
-                    }
+                    let key = TlsSessionResult::new(
+                        source_ip,
+                        destination_ip,
+                        destination_port,
+                        description.to_string(),
+                    );
+                    set.insert(key);
+                }
             }
         }
     }
@@ -381,7 +391,21 @@ struct ReportResults {
     ssh_sessions_results: HashMap::<String, BTreeSet::<String>>,
     tls_hosts: BTreeSet<String>,
     tls_hosts_pqc: HashMap::<String, BTreeSet::<String>>,
-    tls_sessions_results: HashMap::<String, BTreeSet::<String>>,
+    tls_sessions_results: HashMap::<String, HashSet::<TlsSessionResult>>,
+}
+
+#[derive(Serialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
+struct TlsSessionResult {
+    source: String,
+    destination: String,
+    port: u16,
+    pqc_status: String,
+}
+
+impl TlsSessionResult {
+    pub fn new(source: String, destination: String, port: u16, pqc_status: String ) -> Self {
+        Self { source, port, destination, pqc_status }
+    }
 }
 
 fn process_packet(packet: &Packet,
