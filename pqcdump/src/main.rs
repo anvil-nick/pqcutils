@@ -151,7 +151,7 @@ fn main() {
 
     let mut cap = Capture::from_file(file_path).expect("Failed to open pcap file");
     
-    let mut sessions: HashMap<FlowKey, SshSession> = HashMap::new();
+    let mut ssh_sessions: HashMap<FlowKey, SshSession> = HashMap::new();
     let mut host_caps: HashMap<String, HostCapabilities> = HashMap::new();
     let mut tls_ciphers: HashMap<String, HashSet<u16>> = HashMap::new();
 	let mut keyshare_groups: HashMap<String, HashSet<u16>> = HashMap::new();
@@ -165,7 +165,7 @@ fn main() {
     
     while let Ok(packet) = cap.next_packet() {
         log::debug!("{}", packet_count);
-        process_packet(&packet,  &mut reassembler, &mut sessions, &mut host_caps, &mut tls_ciphers, &mut keyshare_groups, &mut tls_sessions);
+        process_packet(&packet,  &mut reassembler, &mut ssh_sessions, &mut host_caps, &mut tls_ciphers, &mut keyshare_groups, &mut tls_sessions);
         packet_count += 1;
         if start_time.is_none(){
             start_time = Some(Utc.timestamp_opt(packet.header.ts.tv_sec.into(), (packet.header.ts.tv_usec * 1000).try_into().unwrap()).unwrap());
@@ -181,10 +181,14 @@ fn main() {
     let mut ssh_hosts_pqc = HashMap::<String, String>::new();
     let mut ssh_sessions_results = HashMap::<String, HashSet::<SshSessionResult>>::new();
 
+    let mut hosts = BTreeSet::<String>::new();
+    let mut pqc_hosts = BTreeSet::<String>::new();
+
     log::info!("\n=== Host Capabilities ===");
     for (host, caps) in &host_caps {
         log::info!("{}", host);
         ssh_hosts.insert(host.to_string());
+        hosts.insert(host.to_string());
         let mut pqc_supported = false;
         for alg in caps.supported_kex() {
             log::info!("  {}", alg);
@@ -200,6 +204,7 @@ fn main() {
         let pqc_support;
         if pqc_supported {
             pqc_support = "PQC Supported".to_string();
+            pqc_hosts.insert(host.to_string());
         } else {
             pqc_support = "No Support".to_string();
         }
@@ -208,7 +213,7 @@ fn main() {
 
     log::info!("\n=== Negotiated Sessions ===");
     let mut ssh_pqc_supported_count = 0;
-    for (flow, session) in &sessions {
+    for (flow, session) in &ssh_sessions {
         if let Some(neg) = &session.negotiated() {
             let source_ip = flow.src().parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
 
@@ -282,15 +287,18 @@ fn main() {
     if !keyshare_groups.is_empty() {
         log::info!("\n=== KeyShare Groups Map ===");
         for (key, values) in &keyshare_groups {
-            let source_ip = key.parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
+            let source_ip = key.parse::<SocketAddr>().expect("invalid socket address").ip().to_string();            
+            hosts.insert(source_ip.to_string());
             tls_hosts_pqc.insert(source_ip.clone(), BTreeSet::<String>::new());
             for value in values {
                 if let Some(group) = groups.get(value) {
                     let description;
                     if group.hybrid {
                         description = format!("{} supports {} which is hybrid", key, group.name);
+                        pqc_hosts.insert(source_ip.to_string());
                     } else if group.pqc {
                         description = format!("{} supports {} which is pure PQC", key, group.name);
+                        pqc_hosts.insert(source_ip.to_string());
                     } else {
                         description = format!("{} supports {} which is not PQC safe at all", key, group.name);
                     }
@@ -353,14 +361,16 @@ fn main() {
     }
 
     let results: ReportResults = ReportResults {
-        ssh_total_count: host_caps.len(),
+        total_count: hosts.len(),
+        pqc_count: pqc_hosts.len(),
+        ssh_total_count: ssh_sessions.len(),
         ssh_pqc_supported_count: ssh_pqc_supported_count,
         tls_total_count: tls_sessions.len(),
         tls_pqc_supported_count: tls_pqc_supported_count,
         packet_count: packet_count,
         start_time: start_time.unwrap_or(Utc::now()),
         end_time: end_time,
-        host_caps: host_caps.clone(),
+        ssh_host_capabilities: host_caps.clone(),
         ssh_hosts: ssh_hosts,
         ssh_hosts_pqc: ssh_hosts_pqc,
         ssh_sessions_results: ssh_sessions_results,
@@ -376,6 +386,8 @@ fn main() {
 
 #[derive(Serialize)]
 struct ReportResults {
+    total_count: usize,
+    pqc_count: usize,
     ssh_total_count: usize,
     ssh_pqc_supported_count: usize,
     tls_total_count: usize,
@@ -383,7 +395,7 @@ struct ReportResults {
     packet_count: usize,
     start_time: DateTime<Utc>,
     end_time: DateTime<Utc>,
-    host_caps: HashMap<String, HostCapabilities>,
+    ssh_host_capabilities: HashMap<String, HostCapabilities>,
     ssh_hosts: BTreeSet<String>,
     ssh_hosts_pqc: HashMap<String, String>,
     ssh_sessions_results: HashMap::<String, HashSet::<SshSessionResult>>,
@@ -423,7 +435,7 @@ impl SshSessionResult {
 fn process_packet(packet: &Packet,
     reassembler: &mut TcpReassembler,
     sessions: &mut HashMap<FlowKey, SshSession>,
-    host_caps: &mut HashMap<String, HostCapabilities>,
+    ssh_host_caps: &mut HashMap<String, HostCapabilities>,
     tls_ciphers: &mut HashMap<String, HashSet<u16>>,
     keyshare_groups: &mut HashMap<String, HashSet<u16>>,
     tls_sessions: &mut HashMap<String, u16>) {
@@ -464,12 +476,12 @@ fn process_packet(packet: &Packet,
                 return;
             }
 
-            process_packet_helper(&sliced, &payload, sessions, host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
+            process_packet_helper(&sliced, &payload, sessions, ssh_host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
 
             // Try a reassembled packet
             if let Some(data) = reassembler.push(key, tcp.sequence_number(), tcp.payload()) { 
                 let payload = &data; 
-                process_packet_helper(&sliced, &payload, sessions, host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
+                process_packet_helper(&sliced, &payload, sessions, ssh_host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
             }   
         }
     }	
@@ -477,15 +489,15 @@ fn process_packet(packet: &Packet,
 
 fn process_packet_helper(sliced: &SlicedPacket, 
         payload: &[u8], 
-        sessions: &mut HashMap<FlowKey, SshSession>,
-        host_caps: &mut HashMap<String, HostCapabilities>,
+        ssh_sessions: &mut HashMap<FlowKey, SshSession>,
+        ssh_host_capabilities: &mut HashMap<String, HostCapabilities>,
         tcp: &etherparse::TcpSlice<'_>,
         tls_ciphers: &mut HashMap<String, HashSet<u16>>, 
         keyshare_groups: &mut HashMap<String, HashSet<u16>>,
         tls_sessions: &mut HashMap<String, u16>){
     if payload[5] == 20 {
         log::debug!("This may be an SSH_MSG_KEXINIT message");
-        ssh::process_ssh(&sliced, &payload, sessions, host_caps);
+        ssh::process_ssh(&sliced, &payload, ssh_sessions, ssh_host_capabilities);
     }
 
     // Check SSLv3+ ClientHello

@@ -15,7 +15,7 @@
         </div>
         <div class="card-body">
 
-            {% set tmp = host_caps[hostname] %}
+            {% set tmp = ssh_host_capabilities[hostname] %}
             {% for tmp2 in tmp.supported_kex %}
               
               {{tmp2}}<br>  
