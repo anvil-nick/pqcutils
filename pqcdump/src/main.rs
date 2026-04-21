@@ -294,7 +294,7 @@ fn main() {
                 if let Some(group) = groups.get(value) {
                     let description;
                     if group.hybrid {
-                        description = format!("{} supports {} which is hybrid", key, group.name);
+                        description = format!("{} supports {} a hybrid algorithm", key, group.name);
                         pqc_hosts.insert(source_ip.to_string());
                     } else if group.pqc {
                         description = format!("{} supports {} which is pure PQC", key, group.name);

@@ -28,12 +28,11 @@
             {% if tls_sessions_results[hostname]%}
                 <h3>Sessions</h3>
                 <table class="table table-sm pqcscan-error pqc-notsupported">
-                  <thead>
-                    
+                  <thead>                    
                     <tr>
                         <th width="20%" class="text-center">Source</th>                  
-                        <th width="20%" class="text-center">Port</th>
                         <th width="20%" class="text-center">Destination</th>
+                        <th width="20%" class="text-center">Destination Port</th>
                         <th width="100%" class="text-center">PQC Status</th>
                     </tr>
                   </thead>  
@@ -41,11 +40,7 @@
                     {% set temp = tls_sessions_results[hostname] %}
                     {% for temp2 in temp %}
                     <tr>
-
                       <td>{{temp2.source}}</td><td>{{temp2.destination}}</td><td>{{temp2.port}}</td><td>{{temp2.pqc_status}}</td>
-                        
-                      
-                
                     </tr>
                     {% endfor %}
                   </tbody>
