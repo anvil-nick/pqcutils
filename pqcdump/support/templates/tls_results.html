@@ -11,16 +11,15 @@
     <div class="col-md-12">
       <div class="card">
         <div class="card-header">
-          <h5>{{hostname}}</h5>
+          <h5>{{hostname}} - {{tls_hosts_pqc[hostname]}}</h5>
         </div>
         <div class="card-body">
 
-            {% if tls_hosts_pqc[hostname]%}
+            {% if tls_host_capabilities[hostname]%}
                 <h3>Supported Key Exchange Algorithms</h3>
-                {% set temp = tls_hosts_pqc[hostname] %}
+                {% set temp = tls_host_capabilities[hostname] %}
                 {% for temp2 in temp %}
-                {{temp2}}<br>  
-                
+                  {{temp2}}<br>  
                 {% endfor %}
             {% endif %}
 

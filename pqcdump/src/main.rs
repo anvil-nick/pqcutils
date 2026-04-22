@@ -269,8 +269,9 @@ fn main() {
     }
 
     let mut tls_hosts = BTreeSet::<String>::new();
+    let mut tls_hosts_pqc = HashMap::<String, String>::new();
     let mut tls_hosts_ciphers = HashMap::<String, BTreeSet::<String>>::new();
-    let mut tls_hosts_pqc = HashMap::<String, BTreeSet::<String>>::new();
+    let mut tls_host_capabilities = HashMap::<String, BTreeSet::<String>>::new();
     let mut tls_sessions_results = HashMap::<String, HashSet::<SessionResult>>::new();
 
     if !tls_ciphers.is_empty() {
@@ -308,30 +309,40 @@ fn main() {
         for (key, values) in &keyshare_groups {
             let source_ip = key.parse::<SocketAddr>().expect("invalid socket address").ip().to_string();            
             hosts.insert(source_ip.to_string());
-            tls_hosts_pqc.insert(source_ip.clone(), BTreeSet::<String>::new());
+            let mut pqc_supported = false;
+            tls_host_capabilities.insert(source_ip.clone(), BTreeSet::<String>::new());
             for value in values {
                 if let Some(group) = groups.get(value) {
                     let description;
                     if group.hybrid {
                         description = format!("{} (Hybrid)", group.name);
-                        pqc_hosts.insert(source_ip.to_string());
+                        pqc_supported = true;
                     } else if group.pqc {
                         description = format!("{} (Pure PQC)", group.name);
-                        pqc_hosts.insert(source_ip.to_string());
+                        pqc_supported = true;
                     } else {
                         description = format!("{} (not PQC safe)", group.name);
                     }
                     log::info!("{}", description);
-                    if let Some(set) = tls_hosts_pqc.get_mut(&source_ip) {
+                    if let Some(set) = tls_host_capabilities.get_mut(&source_ip) {
                         set.insert(description);
                     }
                     
                 }
             }
+            
+            let pqc_support;
+            if pqc_supported {
+                pqc_support = "PQC Supported".to_string();
+                pqc_hosts.insert(source_ip.to_string());
+            } else {
+                pqc_support = "No Support".to_string();
+            }
+            tls_hosts_pqc.insert(source_ip.to_string(), pqc_support.to_string());
         }
     }
 
-    for (key, set) in &tls_hosts_pqc {
+    for (key, set) in &tls_host_capabilities {
         log::info!("Key: {}", key);
 
         for value in set {
@@ -397,6 +408,7 @@ fn main() {
         ssh_sessions_results: ssh_sessions_results,
         tls_hosts: tls_hosts,
         tls_hosts_pqc: tls_hosts_pqc,
+        tls_host_capabilities,
         tls_sessions_results: tls_sessions_results,
     };
 
@@ -422,7 +434,8 @@ struct ReportResults {
     ssh_hosts_pqc: HashMap<String, String>,
     ssh_sessions_results: HashMap::<String, HashSet::<SessionResult>>,
     tls_hosts: BTreeSet<String>,
-    tls_hosts_pqc: HashMap::<String, BTreeSet::<String>>,
+    tls_hosts_pqc: HashMap<String, String>,
+    tls_host_capabilities: HashMap::<String, BTreeSet::<String>>,
     tls_sessions_results: HashMap::<String, HashSet::<SessionResult>>,
 }
 
