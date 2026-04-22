@@ -217,8 +217,7 @@ fn main() {
     for (flow, session) in &ssh_sessions {
         if let Some(neg) = &session.negotiated() {
             let source_ip = flow.src().parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
-
-            //let socket = dest.parse::<std::net::SocketAddr>().expect("invalid socket address");
+            let source_port = flow.src().parse::<SocketAddr>().expect("invalid socket address").port();
             let destination_ip = flow.dst().parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
             let destination_port = flow.dst().parse::<SocketAddr>().expect("invalid socket address").port();
             
@@ -238,6 +237,7 @@ fn main() {
                 if let Some(set) = ssh_sessions_results.get_mut(&source_ip) {
                     let session_result = SshSessionResult::new(
                         source_ip,
+                        source_port,
                         destination_ip,
                         destination_port,
                         description.to_string(),
@@ -414,23 +414,24 @@ struct TlsSessionResult {
     pqc_status: String,
 }
 
-#[derive(Serialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
-struct SshSessionResult {
-    source: String,
-    destination: String,
-    port: u16,
-    pqc_status: String,
-}
-
 impl TlsSessionResult {
     pub fn new(source: String, source_port: u16, destination: String, port: u16, pqc_status: String ) -> Self {
         Self { source, source_port, destination_port: port, destination, pqc_status }
     }
 }
 
+#[derive(Serialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
+struct SshSessionResult {
+    source: String,
+    source_port: u16,
+    destination: String,
+    destination_port: u16,
+    pqc_status: String,
+}
+
 impl SshSessionResult {
-    pub fn new(source: String, destination: String, port: u16, pqc_status: String ) -> Self {
-        Self { source, port, destination, pqc_status }
+    pub fn new(source: String, source_port: u16, destination: String, port: u16, pqc_status: String ) -> Self {
+        Self { source, source_port, destination_port: port, destination, pqc_status }
     }
 }
 

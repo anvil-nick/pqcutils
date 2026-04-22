@@ -15,6 +15,7 @@
         </div>
         <div class="card-body">
 
+            <h3>Supported Key Exchange Algorithms</h3>
             {% set tmp = ssh_host_capabilities[hostname] %}
             {% for tmp2 in tmp.supported_kex %}
               
@@ -26,9 +27,9 @@
               <h3>Sessions</h3>
                 <table class="table table-sm pqcscan-error pqc-notsupported">
                   <thead>
-                    
                     <tr>
-                        <th width="20%" class="text-center">Source</th>                  
+                        <th width="20%" class="text-center">Source</th>
+                        <th width="20%" class="text-center">Source Port</th>
                         <th width="20%" class="text-center">Destination</th>
                         <th width="20%" class="text-center">Destination Port</th>
                         <th width="100%" class="text-center">PQC Status</th>
@@ -38,7 +39,7 @@
                     {% set temp = ssh_sessions_results[hostname] %}
                     {% for temp2 in temp %}
                     <tr>
-                      <td>{{temp2.source}}</td><td>{{temp2.destination}}</td><td>{{temp2.port}}</td><td>{{temp2.pqc_status}}</td>
+                      <td>{{temp2.source}}</td><td>{{temp2.source_port}}</td><td>{{temp2.destination}}</td><td>{{temp2.destination_port}}</td><td>{{temp2.pqc_status}}</td>
                     </tr>
                     {% endfor %}
                   </tbody>
