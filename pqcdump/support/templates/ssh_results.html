@@ -17,7 +17,7 @@
 
             <h3>Supported Key Exchange Algorithms</h3>
             {% set tmp = ssh_host_capabilities[hostname] %}
-            {% for tmp2 in tmp.supported_kex %}
+            {% for tmp2 in tmp %}
               
               {{tmp2}}<br>  
               

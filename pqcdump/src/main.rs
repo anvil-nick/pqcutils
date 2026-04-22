@@ -180,6 +180,8 @@ fn main() {
 
     let mut ssh_hosts = BTreeSet::<String>::new();
     let mut ssh_hosts_pqc = HashMap::<String, String>::new();
+    
+    let mut ssh_hosts_pqc_algos = HashMap::<String, BTreeSet::<String>>::new();
     let mut ssh_sessions_results = HashMap::<String, HashSet::<SessionResult>>::new();
 
     let mut hosts = BTreeSet::<String>::new();
@@ -191,13 +193,25 @@ fn main() {
         ssh_hosts.insert(host.to_string());
         hosts.insert(host.to_string());
         let mut pqc_supported = false;
+        ssh_hosts_pqc_algos.insert(host.clone(), BTreeSet::<String>::new());
         for alg in caps.supported_kex() {
             log::info!("  {}", alg);
             if let Some(algo) =  kex_algos.get(alg) {
                 log::info!("{} {}", alg, algo.pqc);
-                if algo.pqc {
+                if algo.pqc || algo.hybrid.unwrap_or(false) {
                     pqc_supported = true;
-                }
+                } 
+                let description;
+                    if algo.hybrid.unwrap_or(false) {
+                        description = format!("{} (Hybrid)", alg);
+                    } else if algo.pqc {
+                        description = format!("{} (PQC Supported)", alg);
+                    } else {
+                        description = format!("{} (not PQC safe)", alg);
+                    }
+                if let Some(set) = ssh_hosts_pqc_algos.get_mut(host) {
+                        set.insert(description);
+                    }
             } else {
                 log::debug!("Algorithm not found ({})", alg);
             }
@@ -377,7 +391,7 @@ fn main() {
         packet_count: packet_count,
         start_time: start_time.unwrap_or(Utc::now()),
         end_time: end_time,
-        ssh_host_capabilities: host_caps.clone(),
+        ssh_host_capabilities: ssh_hosts_pqc_algos,
         ssh_hosts: ssh_hosts,
         ssh_hosts_pqc: ssh_hosts_pqc,
         ssh_sessions_results: ssh_sessions_results,
@@ -403,7 +417,7 @@ struct ReportResults {
     packet_count: usize,
     start_time: DateTime<Utc>,
     end_time: DateTime<Utc>,
-    ssh_host_capabilities: HashMap<String, HostCapabilities>,
+    ssh_host_capabilities: HashMap<String, BTreeSet::<String>>,
     ssh_hosts: BTreeSet<String>,
     ssh_hosts_pqc: HashMap<String, String>,
     ssh_sessions_results: HashMap::<String, HashSet::<SessionResult>>,
