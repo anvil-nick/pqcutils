@@ -8,6 +8,7 @@ use rust_embed::RustEmbed;
 use clap::Parser;
 use crate::ssh::{FlowKey, SshSession, HostCapabilities};
 use crate::tcp::{TcpReassembler, TcpFlowKey};
+use crate::tls::TlsSessionKey;
 use chrono::{DateTime, TimeZone, Utc};
 
 mod ssh;
@@ -155,7 +156,7 @@ fn main() {
     let mut host_caps: HashMap<String, HostCapabilities> = HashMap::new();
     let mut tls_ciphers: HashMap<String, HashSet<u16>> = HashMap::new();
 	let mut keyshare_groups: HashMap<String, HashSet<u16>> = HashMap::new();
-	let mut tls_sessions: HashMap<String, u16> = HashMap::new();
+	let mut tls_sessions: HashMap<TlsSessionKey, u16> = HashMap::new();
     let mut reassembler = TcpReassembler::new();
 
     let mut packet_count = 1;
@@ -300,7 +301,7 @@ fn main() {
                         description = format!("{} supports {} which is pure PQC", key, group.name);
                         pqc_hosts.insert(source_ip.to_string());
                     } else {
-                        description = format!("{} supports {} which is not PQC safe at all", key, group.name);
+                        description = format!("{} supports {} which is not PQC safe", key, group.name);
                     }
                     log::info!("{}", description);
                     if let Some(set) = tls_hosts_pqc.get_mut(&source_ip) {
@@ -326,13 +327,12 @@ fn main() {
         log::info!("\n=== Negotiated TLS Sessions ===");
         for (key, value) in &tls_sessions {
             log::info!("{}", key);
-            let (source_ip, dest) = key.split_once("->").unwrap(); 
-            let source_ip = source_ip.to_string();
-            let socket = dest.parse::<std::net::SocketAddr>().expect("invalid socket address");
-            let destination_ip = socket.ip().to_string();
-            let destination_port = socket.port();
+            let source_ip = key.src_ip;
+            let source_port = key.src_port;
+            let destination_ip = key.dst_ip;
+            let destination_port = key.dst_port;
             tls_sessions_results
-                .entry(source_ip.clone())
+                .entry(source_ip.to_string())
                 .or_insert_with(HashSet::<TlsSessionResult>::new);
             if let Some(group) = groups.get(value) {
                 log::info!("{} -> {}", key, group.name);
@@ -347,10 +347,11 @@ fn main() {
                     description = "none";
                 }
                 log::info!("{}", description);
-                if let Some(set) = tls_sessions_results.get_mut(&source_ip) {
+                if let Some(set) = tls_sessions_results.get_mut(&source_ip.to_string()) {
                     let key = TlsSessionResult::new(
-                        source_ip,
-                        destination_ip,
+                        source_ip.to_string(),
+                        source_port,
+                        destination_ip.to_string(),
                         destination_port,
                         description.to_string(),
                     );
@@ -407,8 +408,9 @@ struct ReportResults {
 #[derive(Serialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
 struct TlsSessionResult {
     source: String,
+    source_port: u16,
     destination: String,
-    port: u16,
+    destination_port: u16,
     pqc_status: String,
 }
 
@@ -421,8 +423,8 @@ struct SshSessionResult {
 }
 
 impl TlsSessionResult {
-    pub fn new(source: String, destination: String, port: u16, pqc_status: String ) -> Self {
-        Self { source, port, destination, pqc_status }
+    pub fn new(source: String, source_port: u16, destination: String, port: u16, pqc_status: String ) -> Self {
+        Self { source, source_port, destination_port: port, destination, pqc_status }
     }
 }
 
@@ -438,7 +440,7 @@ fn process_packet(packet: &Packet,
     ssh_host_caps: &mut HashMap<String, HostCapabilities>,
     tls_ciphers: &mut HashMap<String, HashSet<u16>>,
     keyshare_groups: &mut HashMap<String, HashSet<u16>>,
-    tls_sessions: &mut HashMap<String, u16>) {
+    tls_sessions: &mut HashMap<TlsSessionKey, u16>) {
     match SlicedPacket::from_ethernet(&packet) {
 	    Err(sliced) => log::debug!("Err {:?}", sliced),
 	    Ok(sliced) => {
@@ -494,7 +496,7 @@ fn process_packet_helper(sliced: &SlicedPacket,
         tcp: &etherparse::TcpSlice<'_>,
         tls_ciphers: &mut HashMap<String, HashSet<u16>>, 
         keyshare_groups: &mut HashMap<String, HashSet<u16>>,
-        tls_sessions: &mut HashMap<String, u16>){
+        tls_sessions: &mut HashMap<TlsSessionKey, u16>){
     if payload[5] == 20 {
         log::debug!("This may be an SSH_MSG_KEXINIT message");
         ssh::process_ssh(&sliced, &payload, ssh_sessions, ssh_host_capabilities);

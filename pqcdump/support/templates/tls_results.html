@@ -19,7 +19,6 @@
                 <h3>Supported Key Exchange</h3>
                 {% set temp = tls_hosts_pqc[hostname] %}
                 {% for temp2 in temp %}
-                
                 {{temp2}}<br>  
                 
                 {% endfor %}
@@ -30,7 +29,8 @@
                 <table class="table table-sm pqcscan-error pqc-notsupported">
                   <thead>                    
                     <tr>
-                        <th width="20%" class="text-center">Source</th>                  
+                        <th width="20%" class="text-center">Source</th>   
+                        <th width="20%" class="text-center">Source Port</th>               
                         <th width="20%" class="text-center">Destination</th>
                         <th width="20%" class="text-center">Destination Port</th>
                         <th width="100%" class="text-center">PQC Status</th>
@@ -40,7 +40,7 @@
                     {% set temp = tls_sessions_results[hostname] %}
                     {% for temp2 in temp %}
                     <tr>
-                      <td>{{temp2.source}}</td><td>{{temp2.destination}}</td><td>{{temp2.port}}</td><td>{{temp2.pqc_status}}</td>
+                      <td>{{temp2.source}}</td><td>{{temp2.source_port}}</td><td>{{temp2.destination}}</td><td>{{temp2.destination_port}}</td><td>{{temp2.pqc_status}}</td>
                     </tr>
                     {% endfor %}
                   </tbody>

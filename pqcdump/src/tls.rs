@@ -1,12 +1,13 @@
 use etherparse::SlicedPacket;
 use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
 
 pub fn process_ssl_hello(sliced: &SlicedPacket<'_>, 
     payload: &[u8], 
     tcp: &etherparse::TcpSlice<'_>,
     tls_ciphers: &mut HashMap<String, HashSet<u16>>, 
     keyshare_groups: &mut HashMap<String, HashSet<u16>>,
-    tls_sessions: &mut HashMap<String, u16>) {
+    tls_sessions: &mut HashMap<TlsSessionKey, u16>) {
     // Handshake type at payload[5]
     let handshake_type = payload[5];
 
@@ -47,27 +48,25 @@ pub fn process_ssl_hello(sliced: &SlicedPacket<'_>,
       } else if handshake_type == 0x02 {
         log::debug!("ServerHello v3 ???");
 
-        let key2 = match &sliced.net {
-            Some(etherparse::NetSlice::Ipv4(ipv4)) => {
-                format!("{}->{}:{}",
-                    ipv4.header().destination_addr(),
-                    ipv4.header().source_addr(),
-                    tcp.destination_port()
-                )
-            }
-            Some(etherparse::NetSlice::Ipv6(ipv6)) => {
-                format!("{}->{}:{}",
-                    ipv6.header().destination_addr(),
-                    ipv6.header().source_addr(),
-                    tcp.destination_port()
-                )
-            }
-            _ => "unknown:0".to_string(),
+        let session_key = match &sliced.net {
+            Some(etherparse::NetSlice::Ipv4(ipv4)) => Some(TlsSessionKey {
+                src_ip: std::net::IpAddr::V4(ipv4.header().destination_addr()),
+                src_port: tcp.destination_port(),
+                dst_ip: std::net::IpAddr::V4(ipv4.header().source_addr()),
+                dst_port: tcp.source_port(),
+            }),
+            Some(etherparse::NetSlice::Ipv6(ipv6)) => Some(TlsSessionKey {
+                src_ip: std::net::IpAddr::V6(ipv6.header().destination_addr()),
+                src_port: tcp.destination_port(),
+                dst_ip: std::net::IpAddr::V6(ipv6.header().source_addr()),
+                dst_port: tcp.source_port(),
+            }),
+            _ => None,
         };
-        
+
         match parse_server_hello_v3(payload){
             Ok(result) => {
-                tls_sessions.insert(key2.clone(), result.keyshare);
+                tls_sessions.insert(session_key.expect("Key pasrsing failed"), result.keyshare);
                 keyshare_groups
                     .entry(key.clone())               // use the base key only
                     .or_insert_with(HashSet::new)         // create Vec<String> if it doesn’t exist
@@ -140,6 +139,7 @@ fn parse_ssl_v3_client_hello(data: &[u8]) -> Result<CryptoConfig, String> {
     offset += 2;
 
 	//println!("offset {} extensions len {}, total data {}", offset, extensions_len, data.len());
+    
 
     if offset + extensions_len > data.len() {
         return Err("Data too short for extensions data".to_string());
@@ -157,7 +157,6 @@ fn parse_ssl_v3_client_hello(data: &[u8]) -> Result<CryptoConfig, String> {
         }
         if ext_type == 0x0033 {
             // KeyShare extension
-            //println!("Found KeyShare extension");
 
             if ext_len < 2 {
                 return Err("KeyShare extension too short".to_string());
@@ -413,5 +412,25 @@ fn signature_scheme_name(code: u16) -> &'static str {
         0x081e => "falcon1024",
         0x2a2a => "private_use",  // reserved for private use
         _ => "unknown",
+    }
+}
+
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+pub struct TlsSessionKey {
+    pub src_ip: IpAddr,
+    pub src_port: u16,
+    pub dst_ip: IpAddr,
+    pub dst_port: u16,
+}
+use std::fmt;
+
+impl fmt::Display for TlsSessionKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}:{}->{}:{}",
+            self.dst_ip, self.dst_port,
+            self.src_ip, self.src_port
+        )
     }
 }
