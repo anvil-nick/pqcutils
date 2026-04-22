@@ -265,7 +265,7 @@ fn main() {
                         source_port,
                         destination_ip,
                         destination_port,
-                        algo.desc.clone().expect("algo error"),
+                        neg.kex().to_string(),
                         description.to_string(),
                     );
                     set.insert(session_result);
