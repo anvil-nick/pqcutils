@@ -17,10 +17,24 @@
 
             {% if tls_host_capabilities[hostname]%}
                 <h3>Supported Key Exchange Algorithms</h3>
-                {% set temp = tls_host_capabilities[hostname] %}
-                {% for temp2 in temp %}
-                  {{temp2}}<br>  
-                {% endfor %}
+                
+                <table class="table table-sm pqcscan-error pqc-notsupported">
+                  <thead>                    
+                    <tr>
+                        <th width="20%" class="text-center">Name</th>   
+                        <th width="60%" class="text-center">Description</th>               
+                        <th width="20%" class="text-center">PQC Status</th>
+                    </tr>
+                  </thead>  
+                  <tbody>  
+                    {% set temp = tls_host_capabilities[hostname] %}
+                    {% for temp2 in temp %}
+                      <tr>
+                        <td><a href="{{temp2.link}}">{{temp2.name}}</a></td><td>{{temp2.description}}</td><td>{{temp2.pqc_status}}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                  </table>
             {% endif %}
 
             {% if tls_sessions_results[hostname]%}

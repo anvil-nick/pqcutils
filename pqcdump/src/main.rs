@@ -181,7 +181,7 @@ fn main() {
     let mut ssh_hosts = BTreeSet::<String>::new();
     let mut ssh_hosts_pqc = HashMap::<String, String>::new();
     
-    let mut ssh_hosts_pqc_algos = HashMap::<String, BTreeSet::<String>>::new();
+    let mut ssh_hosts_pqc_algos = HashMap::<String, BTreeSet::<AlgorithmDetails>>::new();
     let mut ssh_sessions_results = HashMap::<String, HashSet::<SessionResult>>::new();
 
     let mut hosts = BTreeSet::<String>::new();
@@ -193,7 +193,9 @@ fn main() {
         ssh_hosts.insert(host.to_string());
         hosts.insert(host.to_string());
         let mut pqc_supported = false;
-        ssh_hosts_pqc_algos.insert(host.clone(), BTreeSet::<String>::new());
+        ssh_hosts_pqc_algos
+            .entry(host.clone())
+            .or_insert_with(BTreeSet::<AlgorithmDetails>::new);
         for alg in caps.supported_kex() {
             log::info!("  {}", alg);
             if let Some(algo) =  kex_algos.get(alg) {
@@ -203,14 +205,20 @@ fn main() {
                 } 
                 let description;
                     if algo.hybrid.unwrap_or(false) {
-                        description = format!("{} (Hybrid)", alg);
+                        description = "Hybrid"
                     } else if algo.pqc {
-                        description = format!("{} (PQC Supported)", alg);
+                        description = "PQC Supported";
                     } else {
-                        description = format!("{} (not PQC safe)", alg);
+                        description = "Not PQC Safe";
                     }
-                if let Some(set) = ssh_hosts_pqc_algos.get_mut(host) {
-                        set.insert(description);
+                    if let Some(set) = ssh_hosts_pqc_algos.get_mut(host) {
+                         let algo = AlgorithmDetails::new(
+                            alg.to_string(),
+                            algo.desc.clone().unwrap_or("-".to_string()),
+                            description.to_string(),
+                            algo.href.clone().unwrap_or("-".to_string())
+                        );
+                        set.insert(algo);
                     }
             } else {
                 log::debug!("Algorithm not found ({})", alg);
@@ -271,7 +279,7 @@ fn main() {
     let mut tls_hosts = BTreeSet::<String>::new();
     let mut tls_hosts_pqc = HashMap::<String, String>::new();
     let mut tls_hosts_ciphers = HashMap::<String, BTreeSet::<String>>::new();
-    let mut tls_host_capabilities = HashMap::<String, BTreeSet::<String>>::new();
+    let mut tls_host_capabilities = HashMap::<String, BTreeSet::<AlgorithmDetails>>::new();
     let mut tls_sessions_results = HashMap::<String, HashSet::<SessionResult>>::new();
 
     if !tls_ciphers.is_empty() {
@@ -310,24 +318,31 @@ fn main() {
             let source_ip = key.parse::<SocketAddr>().expect("invalid socket address").ip().to_string();            
             hosts.insert(source_ip.to_string());
             let mut pqc_supported = false;
-            tls_host_capabilities.insert(source_ip.clone(), BTreeSet::<String>::new());
+            tls_host_capabilities
+                .entry(source_ip.clone())
+                .or_insert_with(BTreeSet::<AlgorithmDetails>::new);
             for value in values {
                 if let Some(group) = groups.get(value) {
                     let description;
                     if group.hybrid {
-                        description = format!("{} (Hybrid)", group.name);
+                        description = "Hybrid";
                         pqc_supported = true;
                     } else if group.pqc {
-                        description = format!("{} (Pure PQC)", group.name);
+                        description = "Pure PQC";
                         pqc_supported = true;
                     } else {
-                        description = format!("{} (not PQC safe)", group.name);
+                        description = "Not PQC safe";
                     }
                     log::info!("{}", description);
                     if let Some(set) = tls_host_capabilities.get_mut(&source_ip) {
-                        set.insert(description);
+                        let algo = AlgorithmDetails::new(
+                            group.name.clone(),
+                            group.desc.clone(),
+                            description.to_string(),
+                            group.href.clone()
+                        );
+                        set.insert(algo);
                     }
-                    
                 }
             }
             
@@ -339,14 +354,6 @@ fn main() {
                 pqc_support = "No Support".to_string();
             }
             tls_hosts_pqc.insert(source_ip.to_string(), pqc_support.to_string());
-        }
-    }
-
-    for (key, set) in &tls_host_capabilities {
-        log::info!("Key: {}", key);
-
-        for value in set {
-            log::info!("  {}", value);
         }
     }
 
@@ -408,7 +415,7 @@ fn main() {
         ssh_sessions_results: ssh_sessions_results,
         tls_hosts: tls_hosts,
         tls_hosts_pqc: tls_hosts_pqc,
-        tls_host_capabilities,
+        tls_host_capabilities: tls_host_capabilities,
         tls_sessions_results: tls_sessions_results,
     };
 
@@ -429,13 +436,13 @@ struct ReportResults {
     packet_count: usize,
     start_time: DateTime<Utc>,
     end_time: DateTime<Utc>,
-    ssh_host_capabilities: HashMap<String, BTreeSet::<String>>,
+    ssh_host_capabilities: HashMap<String, BTreeSet::<AlgorithmDetails>>,
     ssh_hosts: BTreeSet<String>,
     ssh_hosts_pqc: HashMap<String, String>,
     ssh_sessions_results: HashMap::<String, HashSet::<SessionResult>>,
     tls_hosts: BTreeSet<String>,
     tls_hosts_pqc: HashMap<String, String>,
-    tls_host_capabilities: HashMap::<String, BTreeSet::<String>>,
+    tls_host_capabilities: HashMap::<String, BTreeSet::<AlgorithmDetails>>,
     tls_sessions_results: HashMap::<String, HashSet::<SessionResult>>,
 }
 
@@ -452,6 +459,19 @@ struct SessionResult {
 impl SessionResult {
     pub fn new(source: String, source_port: u16, destination: String, port: u16, algorithm: String, pqc_status: String ) -> Self {
         Self { source, source_port, destination_port: port, destination, algorithm, pqc_status }
+    }
+}
+#[derive(Serialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
+struct AlgorithmDetails {
+    name: String,
+    description: String,
+    pqc_status: String,
+    link: String
+}
+
+impl AlgorithmDetails {
+    pub fn new(name: String, description: String, pqc_status: String, link: String) -> Self {
+        Self { name, description, pqc_status, link }
     }
 }
 
