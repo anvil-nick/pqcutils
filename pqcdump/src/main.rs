@@ -180,7 +180,7 @@ fn main() {
 
     let mut ssh_hosts = BTreeSet::<String>::new();
     let mut ssh_hosts_pqc = HashMap::<String, String>::new();
-    let mut ssh_sessions_results = HashMap::<String, HashSet::<SshSessionResult>>::new();
+    let mut ssh_sessions_results = HashMap::<String, HashSet::<SessionResult>>::new();
 
     let mut hosts = BTreeSet::<String>::new();
     let mut pqc_hosts = BTreeSet::<String>::new();
@@ -221,7 +221,7 @@ fn main() {
             let destination_ip = flow.dst().parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
             let destination_port = flow.dst().parse::<SocketAddr>().expect("invalid socket address").port();
             
-            ssh_sessions_results.insert(source_ip.clone(), HashSet::<SshSessionResult>::new());
+            ssh_sessions_results.insert(source_ip.clone(), HashSet::<SessionResult>::new());
             log::info!("{} -> {} : {}", flow.src(), flow.dst(), neg.kex());
             if let Some(algo) =  kex_algos.get(neg.kex()) {
                 log::info!("{} {}", neg.kex(), algo.pqc);
@@ -229,20 +229,21 @@ fn main() {
                 if algo.pqc {
                     log::info!("PQC Supported");
                     ssh_pqc_supported_count += 1;
-                    description = algo.desc.clone().expect("algorithm error") + " (PQC Supported)";
+                    description = "PQC Supported";
                 } else if algo.hybrid.unwrap_or(false) {
                     log::info!("Hybrid");
-                    description = algo.desc.clone().expect("algorithm error") + " (PQC NOT Supported)";
+                    description = "Hybrid";
                 } else {
                     log::info!("NOT Supported");
-                    description = algo.desc.clone().expect("algorithm error") + " (PQC NOT Supported)";
+                    description = "NOT Supported";
                 } 
                 if let Some(set) = ssh_sessions_results.get_mut(&source_ip) {
-                    let session_result = SshSessionResult::new(
+                    let session_result = SessionResult::new(
                         source_ip,
                         source_port,
                         destination_ip,
                         destination_port,
+                        algo.desc.clone().expect("algo error"),
                         description.to_string(),
                     );
                     set.insert(session_result);
@@ -256,7 +257,7 @@ fn main() {
     let mut tls_hosts = BTreeSet::<String>::new();
     let mut tls_hosts_ciphers = HashMap::<String, BTreeSet::<String>>::new();
     let mut tls_hosts_pqc = HashMap::<String, BTreeSet::<String>>::new();
-    let mut tls_sessions_results = HashMap::<String, HashSet::<TlsSessionResult>>::new();
+    let mut tls_sessions_results = HashMap::<String, HashSet::<SessionResult>>::new();
 
     if !tls_ciphers.is_empty() {
         log::info!("\n=== TLS CIPHERS Map ===");
@@ -298,7 +299,7 @@ fn main() {
                 if let Some(group) = groups.get(value) {
                     let description;
                     if group.hybrid {
-                        description = format!("{} (hybrid)", group.name);
+                        description = format!("{} (Hybrid)", group.name);
                         pqc_hosts.insert(source_ip.to_string());
                     } else if group.pqc {
                         description = format!("{} (Pure PQC)", group.name);
@@ -336,26 +337,27 @@ fn main() {
             let destination_port = key.dst_port;
             tls_sessions_results
                 .entry(source_ip.to_string())
-                .or_insert_with(HashSet::<TlsSessionResult>::new);
+                .or_insert_with(HashSet::<SessionResult>::new);
             if let Some(group) = groups.get(value) {
                 log::info!("{} -> {}", key, group.name);
                 let description;
                 if group.hybrid {
-                    description = group.name.clone() + " (hybrid)";
+                    description = "Hybrid";
                     tls_pqc_supported_count += 1;
                 } else if group.pqc {
-                    description =  group.name.clone() + " (pure)";
+                    description = "Pure PQC";
                     tls_pqc_supported_count += 1;
                 } else {
-                    description =  group.name.clone() + " (none)";
+                    description = "NOT Supported";
                 }
                 log::info!("{}", description);
                 if let Some(set) = tls_sessions_results.get_mut(&source_ip.to_string()) {
-                    let key = TlsSessionResult::new(
+                    let key = SessionResult::new(
                         source_ip.to_string(),
                         source_port,
                         destination_ip.to_string(),
                         destination_port,
+                        group.name.clone(),
                         description.to_string(),
                     );
                     set.insert(key);
@@ -404,39 +406,25 @@ struct ReportResults {
     ssh_host_capabilities: HashMap<String, HostCapabilities>,
     ssh_hosts: BTreeSet<String>,
     ssh_hosts_pqc: HashMap<String, String>,
-    ssh_sessions_results: HashMap::<String, HashSet::<SshSessionResult>>,
+    ssh_sessions_results: HashMap::<String, HashSet::<SessionResult>>,
     tls_hosts: BTreeSet<String>,
     tls_hosts_pqc: HashMap::<String, BTreeSet::<String>>,
-    tls_sessions_results: HashMap::<String, HashSet::<TlsSessionResult>>,
+    tls_sessions_results: HashMap::<String, HashSet::<SessionResult>>,
 }
 
 #[derive(Serialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
-struct TlsSessionResult {
+struct SessionResult {
     source: String,
     source_port: u16,
     destination: String,
     destination_port: u16,
+    algorithm: String,
     pqc_status: String,
 }
 
-impl TlsSessionResult {
-    pub fn new(source: String, source_port: u16, destination: String, port: u16, pqc_status: String ) -> Self {
-        Self { source, source_port, destination_port: port, destination, pqc_status }
-    }
-}
-
-#[derive(Serialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
-struct SshSessionResult {
-    source: String,
-    source_port: u16,
-    destination: String,
-    destination_port: u16,
-    pqc_status: String,
-}
-
-impl SshSessionResult {
-    pub fn new(source: String, source_port: u16, destination: String, port: u16, pqc_status: String ) -> Self {
-        Self { source, source_port, destination_port: port, destination, pqc_status }
+impl SessionResult {
+    pub fn new(source: String, source_port: u16, destination: String, port: u16, algorithm: String, pqc_status: String ) -> Self {
+        Self { source, source_port, destination_port: port, destination, algorithm, pqc_status }
     }
 }
 

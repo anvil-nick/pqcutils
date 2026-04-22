@@ -29,9 +29,10 @@
                   <thead>
                     <tr>
                         <th width="20%" class="text-center">Source</th>
-                        <th width="20%" class="text-center">Source Port</th>
+                        <th width="10%" class="text-center">Source Port</th>
                         <th width="20%" class="text-center">Destination</th>
-                        <th width="20%" class="text-center">Destination Port</th>
+                        <th width="10%" class="text-center">Destination Port</th>
+                        <th width="20%" class="text-center">Algorithm</th>
                         <th width="100%" class="text-center">PQC Status</th>
                     </tr>
                   </thead>  
@@ -39,7 +40,7 @@
                     {% set temp = ssh_sessions_results[hostname] %}
                     {% for temp2 in temp %}
                     <tr>
-                      <td>{{temp2.source}}</td><td>{{temp2.source_port}}</td><td>{{temp2.destination}}</td><td>{{temp2.destination_port}}</td><td>{{temp2.pqc_status}}</td>
+                      <td>{{temp2.source}}</td><td>{{temp2.source_port}}</td><td>{{temp2.destination}}</td><td>{{temp2.destination_port}}</td><td>{{temp2.algorithm}}</td><td>{{temp2.pqc_status}}</td>
                     </tr>
                     {% endfor %}
                   </tbody>
