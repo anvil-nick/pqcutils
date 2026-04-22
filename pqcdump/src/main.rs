@@ -229,10 +229,13 @@ fn main() {
                 if algo.pqc {
                     log::info!("PQC Supported");
                     ssh_pqc_supported_count += 1;
-                    description = "PQC Supported";
+                    description = algo.desc.clone().expect("algorithm error") + " (PQC Supported)";
+                } else if algo.hybrid.unwrap_or(false) {
+                    log::info!("Hybrid");
+                    description = algo.desc.clone().expect("algorithm error") + " (PQC NOT Supported)";
                 } else {
                     log::info!("NOT Supported");
-                    description = "PQC NOT Supported";
+                    description = algo.desc.clone().expect("algorithm error") + " (PQC NOT Supported)";
                 } 
                 if let Some(set) = ssh_sessions_results.get_mut(&source_ip) {
                     let session_result = SshSessionResult::new(
@@ -295,13 +298,13 @@ fn main() {
                 if let Some(group) = groups.get(value) {
                     let description;
                     if group.hybrid {
-                        description = format!("{} supports {} a hybrid algorithm", key, group.name);
+                        description = format!("{} (hybrid)", group.name);
                         pqc_hosts.insert(source_ip.to_string());
                     } else if group.pqc {
-                        description = format!("{} supports {} which is pure PQC", key, group.name);
+                        description = format!("{} (Pure PQC)", group.name);
                         pqc_hosts.insert(source_ip.to_string());
                     } else {
-                        description = format!("{} supports {} which is not PQC safe", key, group.name);
+                        description = format!("{} (not PQC safe)", group.name);
                     }
                     log::info!("{}", description);
                     if let Some(set) = tls_hosts_pqc.get_mut(&source_ip) {
@@ -338,13 +341,13 @@ fn main() {
                 log::info!("{} -> {}", key, group.name);
                 let description;
                 if group.hybrid {
-                    description = "hybrid";
+                    description = group.name.clone() + " (hybrid)";
                     tls_pqc_supported_count += 1;
                 } else if group.pqc {
-                    description = "full";
+                    description =  group.name.clone() + " (pure)";
                     tls_pqc_supported_count += 1;
                 } else {
-                    description = "none";
+                    description =  group.name.clone() + " (none)";
                 }
                 log::info!("{}", description);
                 if let Some(set) = tls_sessions_results.get_mut(&source_ip.to_string()) {

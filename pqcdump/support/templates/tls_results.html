@@ -16,7 +16,7 @@
         <div class="card-body">
 
             {% if tls_hosts_pqc[hostname]%}
-                <h3>Supported Key Exchange</h3>
+                <h3>Supported Key Exchange Algorithms</h3>
                 {% set temp = tls_hosts_pqc[hostname] %}
                 {% for temp2 in temp %}
                 {{temp2}}<br>  
