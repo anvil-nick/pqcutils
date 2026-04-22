@@ -362,6 +362,7 @@ fn main() {
     }
 
     let results: ReportResults = ReportResults {
+        filename: file_path.file_name().map(|s| s.to_string_lossy().into_owned()).expect("filename error"),
         total_count: hosts.len(),
         pqc_count: pqc_hosts.len(),
         ssh_total_count: ssh_sessions.len(),
@@ -387,6 +388,7 @@ fn main() {
 
 #[derive(Serialize)]
 struct ReportResults {
+    filename: String,
     total_count: usize,
     pqc_count: usize,
     ssh_total_count: usize,
