@@ -27,17 +27,17 @@
                             <td>{{ pqc_count }}</td>
                             </tr>
                             {% endif %}
-                            {% if ssh_total_count > 0 %}
+                            {% if ssh_hosts_count > 0 %}
                             <tr>                           
                             <th>SSH Sessions</th>
-                            <td>{{ ssh_total_count }}</td>
+                            <td>{{ ssh_sessions_count }}</td>
                             <td>{{ ssh_pqc_supported_count }}</td>
                             </tr>
                             {% endif %}
-                            {% if tls_total_count > 0 %}
+                            {% if tls_hosts_count > 0 %}
                             <tr>
                             <th>TLS Sessions</th>
-                            <td>{{ tls_total_count }}</td>
+                            <td>{{ tls_sessions_count }}</td>
                             <td>{{ tls_pqc_supported_count }}</td>
                             </tr>
                             {% endif %}

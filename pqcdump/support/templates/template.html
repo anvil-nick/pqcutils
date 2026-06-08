@@ -85,12 +85,12 @@
         <li class="nav-item active">
           <a class="nav-link active" id="summary-tab" data-toggle="tab" href="#summary" role="tab" aria-controls="summary" aria-selected="true" aria-current="page" >Summary</a>
         </li>
-        {% if ssh_total_count > 0 %}
+        {% if ssh_hosts_count > 0 %}
         <li class="nav-item">
             <a class="nav-link" id="ssh-tab" data-toggle="tab" href="#ssh" role="tab" aria-controls="ssh" aria-selected="false">SSH Results</a>
         </li>
         {% endif %}
-        {% if tls_total_count > 0 %}
+        {% if tls_hosts_count > 0 %}
         <li class="nav-item">
             <a class="nav-link" id="tls-tab" shown="alert(123);" data-toggle="tab" href="#tls" role="tab" aria-controls="tls" aria-selected="false">TLS Results</a>
         </li>
@@ -101,12 +101,12 @@
       <div class="tab-pane active" id="summary" role="tabpanel" aria-labelledby="summary-tab">
         {% include ["summary.html"] %}
       </div>
-      {% if ssh_total_count > 0 %}
+      {% if ssh_hosts_count > 0 %}
       <div class="tab-pane fade" id="ssh" role="tabpanel" aria-labelledby="ssh-tab">
         {% include ["ssh_results.html"] %}
       </div>
       {% endif %}
-      {% if tls_total_count > 0 %}
+      {% if tls_hosts_count > 0 %}
       <div class="tab-pane fade" id="tls" role="tabpanel" aria-labelledby="tls-tab">
         {% include ["tls_results.html"] %}
       </div>
