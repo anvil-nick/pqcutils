@@ -35,10 +35,7 @@ impl TcpJoiner {
         if seq == self.next_seq {
             self.buffer.extend_from_slice(payload);
             self.next_seq += payload.len() as u32;
-
-            // return the combined payload
-            let data = self.buffer.clone();
-            return Some(data);
+            return Some(std::mem::take(&mut self.buffer));
         }
 
         // sequence mismatch → reset
@@ -50,6 +47,7 @@ impl TcpJoiner {
     }
 }
 
+#[derive(Default)]
 pub struct TcpReassembler {
     flows: HashMap<TcpFlowKey, TcpJoiner>,
 }
@@ -71,7 +69,7 @@ impl TcpReassembler {
         let stream = self
             .flows
             .entry(key)
-            .or_insert_with(|| TcpJoiner::new(seq));
+            .or_insert(TcpJoiner::new(seq));
 
         stream.push(seq, payload)
     }

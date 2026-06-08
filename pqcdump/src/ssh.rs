@@ -1,5 +1,5 @@
-use etherparse::{SlicedPacket};
-use std::{collections::HashMap};
+use etherparse::SlicedPacket;
+use std::collections::HashMap;
 use serde::{Serialize,Deserialize};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
@@ -18,7 +18,7 @@ impl FlowKey {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct SshSession {
     client_kexinit: Option<KexInit>,
     server_kexinit: Option<KexInit>,
@@ -98,36 +98,23 @@ pub fn process_ssh(sliced: &SlicedPacket, payload: &[u8], sessions: &mut HashMap
     } else if let Some(s) = sessions.get_mut(&reverse_flow) {
         (s, false)
     } else {
-        let s = sessions.entry(flow.clone()).or_insert(SshSession {
-            client_kexinit: None,
-            server_kexinit: None,
-            negotiated: None,
-        });
+        let s = sessions.entry(flow.clone()).or_default();
         (s, true)
     };
 
-    if is_forward {
-        if session.client_kexinit.is_none() {
-            session.client_kexinit = Some(kex.clone());
-            update_host_caps(host_caps, &src_ip, &kex);
-        }
-    } else {
-        if session.server_kexinit.is_none() {
-            session.server_kexinit = Some(kex.clone());
-            update_host_caps(host_caps, &src_ip, &kex);
-        }
+    if is_forward && session.client_kexinit.is_none() {
+        session.client_kexinit = Some(kex.clone());
+        update_host_caps(host_caps, &src_ip, &kex);
+    } else if !is_forward && session.server_kexinit.is_none() {
+        session.server_kexinit = Some(kex.clone());
+        update_host_caps(host_caps, &src_ip, &kex);
     }
 
-    // Perform negotiation if both present
-    if session.client_kexinit.is_some()
-        && session.server_kexinit.is_some()
-        && session.negotiated.is_none()
-    {
-        let client = session.client_kexinit.as_ref().unwrap();
-        let server = session.server_kexinit.as_ref().unwrap();
-
-        if let Some(neg) = negotiate(&client.kex_algorithms, &server.kex_algorithms) {
-            session.negotiated = Some(NegotiatedAlgorithms { kex: neg });
+    if session.negotiated.is_none() {
+        if let (Some(client), Some(server)) = (session.client_kexinit.as_ref(), session.server_kexinit.as_ref()) {
+            if let Some(neg) = negotiate(&client.kex_algorithms, &server.kex_algorithms) {
+                session.negotiated = Some(NegotiatedAlgorithms { kex: neg });
+            }
         }
     }
 }
@@ -160,7 +147,7 @@ fn parse_ssh_kexinit(payload: &[u8]) -> Option<KexInit> {
 
     let mut data = &payload[6..];
 
-    let _cookie: &[u8; 16] = data.get(..16)?.try_into().ok()?;
+    data.get(..16)?;
     data = &data[16..];
 
     let kex_algorithms = read_name_list_owned(&mut data)?;
@@ -176,7 +163,6 @@ fn parse_ssh_kexinit(payload: &[u8]) -> Option<KexInit> {
 }
 
 fn read_name_list_owned(data: &mut &[u8]) -> Option<Vec<String>> {
-    // Read u32 length prefix
     let len = read_u32(data)? as usize;
 
     if data.len() < len {
@@ -186,16 +172,9 @@ fn read_name_list_owned(data: &mut &[u8]) -> Option<Vec<String>> {
     let list_bytes = &data[..len];
     *data = &data[len..];
 
-    // Convert to UTF-8 string
     let list_str = std::str::from_utf8(list_bytes).ok()?;
 
-    // Split by commas and collect owned Strings
-    let vec = list_str
-        .split(',')
-        .map(|s| s.to_string())
-        .collect();
-
-    Some(vec)
+    Some(list_str.split(',').map(|s| s.to_string()).collect())
 }
 
 fn read_u32(data: &mut &[u8]) -> Option<u32> {

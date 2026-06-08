@@ -33,15 +33,15 @@ pub fn process_ssl_hello(sliced: &SlicedPacket<'_>,
             Ok(result) => {
             for val in result.ciphers.iter() {
                 tls_ciphers
-                    .entry(key.clone())                // use `key` as-is, no iterator suffix
-                    .or_insert_with(HashSet::new)          // create Vec<String> if missing
-                    .insert(val.clone());                // append the new value
+                    .entry(key.clone())
+                    .or_default()
+                    .insert(*val);
                 }
             for val in result.keyshare_groups.iter() {
                 keyshare_groups
-                    .entry(key.clone())               // use the base key only
-                    .or_insert_with(HashSet::new)         // create Vec<String> if it doesn’t exist
-                    .insert(val.clone()); 
+                    .entry(key.clone())
+                    .or_default()
+                    .insert(*val);
             }}
             Err(e) => {log::debug!("Error: {}", e); }
         }
@@ -50,15 +50,15 @@ pub fn process_ssl_hello(sliced: &SlicedPacket<'_>,
 
         let session_key = match &sliced.net {
             Some(etherparse::NetSlice::Ipv4(ipv4)) => Some(TlsSessionKey {
-                src_ip: std::net::IpAddr::V4(ipv4.header().destination_addr()),
+                src_ip: IpAddr::V4(ipv4.header().destination_addr()),
                 src_port: tcp.destination_port(),
-                dst_ip: std::net::IpAddr::V4(ipv4.header().source_addr()),
+                dst_ip: IpAddr::V4(ipv4.header().source_addr()),
                 dst_port: tcp.source_port(),
             }),
             Some(etherparse::NetSlice::Ipv6(ipv6)) => Some(TlsSessionKey {
-                src_ip: std::net::IpAddr::V6(ipv6.header().destination_addr()),
+                src_ip: IpAddr::V6(ipv6.header().destination_addr()),
                 src_port: tcp.destination_port(),
-                dst_ip: std::net::IpAddr::V6(ipv6.header().source_addr()),
+                dst_ip: IpAddr::V6(ipv6.header().source_addr()),
                 dst_port: tcp.source_port(),
             }),
             _ => None,
@@ -68,14 +68,14 @@ pub fn process_ssl_hello(sliced: &SlicedPacket<'_>,
             Ok(result) => {
                 tls_sessions.insert(session_key.expect("Key pasrsing failed"), result.keyshare);
                 keyshare_groups
-                    .entry(key.clone())               // use the base key only
-                    .or_insert_with(HashSet::new)         // create Vec<String> if it doesn’t exist
-                    .insert(result.keyshare); 
+                    .entry(key.clone())
+                    .or_default()
+                    .insert(result.keyshare);
                 for val in result.ciphers.iter() {
                     tls_ciphers
-                        .entry(key.clone())                // use `key` as-is, no iterator suffix
-                        .or_insert_with(HashSet::new)          // create Vec<String> if missing
-                        .insert(val.clone());                // append the new value
+                        .entry(key.clone())
+                        .or_default()
+                        .insert(*val);
                     }
             }
             Err(e) => {log::debug!("Error: {}", e); }
@@ -138,9 +138,6 @@ fn parse_ssl_v3_client_hello(data: &[u8]) -> Result<CryptoConfig, String> {
     let extensions_len = ((data[offset] as usize) << 8) | data[offset + 1] as usize;
     offset += 2;
 
-	//println!("offset {} extensions len {}, total data {}", offset, extensions_len, data.len());
-    
-
     if offset + extensions_len > data.len() {
         return Err("Data too short for extensions data".to_string());
     }
@@ -161,7 +158,6 @@ fn parse_ssl_v3_client_hello(data: &[u8]) -> Result<CryptoConfig, String> {
             if ext_len < 2 {
                 return Err("KeyShare extension too short".to_string());
             }
-            // let key_share_list_len = ((data[offset] as usize) << 8) | data[offset + 1] as usize;
             let mut ks_offset = offset + 2;
 
             while ks_offset + 4 <= offset + ext_len {
@@ -208,11 +204,9 @@ fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> 
     let mut pos = handshake_start + 4;
 
     // Version (2 bytes)
-    //let version = &payload[pos..pos+2];
     pos += 2;
 
     // Random (32 bytes)
-    //let random = &payload[pos..pos+32];
     pos += 32;
 
     // Session ID length (1 byte)
@@ -223,7 +217,6 @@ fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> 
     if payload.len() < pos + session_id_len + 3 {
         return Err("Payload too short for Session ID");
     }
-    //let session_id = &payload[pos..pos+session_id_len];
     pos += session_id_len;
 
     // Cipher Suite (2 bytes)
@@ -235,7 +228,6 @@ fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> 
 	log::debug!("Cipher Suite: 0x{:04x}", cipher_code);
 
     // Compression method (1 byte)
-    //let compression_method = payload[pos];
     pos += 1;
 
 	// Extensions length (2 bytes)
@@ -264,16 +256,15 @@ fn parse_server_hello_v3(payload: &[u8]) -> Result<SessionConfig, &'static str> 
                 keyshare = Some(ks);
             }
             _ => {
-                eprintln!(
-                    "Error: expected at most one KeyShareEntry, got {}",
+                log::warn!(
+                    "expected at most one KeyShareEntry, got {}",
                     key_share_entries.len()
                 );
             }
         }
     }
-	let cipher_suites: Vec<u16> = vec![cipher_code];
     Ok(SessionConfig {
-        ciphers: cipher_suites, 
+        ciphers: vec![cipher_code],
         keyshare: keyshare.unwrap_or_else(|| {
             log::debug!("Warning: missing keyshare");
             0
@@ -307,7 +298,7 @@ fn parse_extensions(extensions: &[u8]) -> Vec<KeyShareEntry>{
         }
 
         if ext_type == 0x0033 { // key share extension type?
-            key_share_entries = parse_key_share(&extensions[pos..pos+ext_len], ext_len);
+            key_share_entries = parse_key_share(&extensions[pos..pos+ext_len]);
         }
 		
 		if ext_type == 0x000d { // signature_algorithms extension type
@@ -316,7 +307,7 @@ fn parse_extensions(extensions: &[u8]) -> Vec<KeyShareEntry>{
         pos += ext_len;
     }
 
-    return key_share_entries;
+    key_share_entries
 }
 
 fn parse_signature_algorithms(data: &[u8]) {
@@ -341,23 +332,16 @@ fn parse_signature_algorithms(data: &[u8]) {
     }
 }
 
-fn parse_key_share(data: &[u8], list_len: usize) -> Vec<KeyShareEntry> {
+fn parse_key_share(data: &[u8]) -> Vec<KeyShareEntry> {
 	log::debug!("parse key share");
 	let mut entries = Vec::new();
     if data.len() < 2 {
         log::debug!("key share data too short");
         return entries;
     }
-	
-	log::debug!("Length: {}", list_len);
-	
-    if data.len() < 2 + list_len {
-        log::debug!("key share list length mismatch");
-        //return;
-    }
 
 	let mut offset = 0;
-    while offset + 4 <= list_len + 2 && offset + 4 <= data.len() {
+    while offset + 4 <= data.len() {
         let group = u16::from_be_bytes([data[offset], data[offset + 1]]);
         let key_len = u16::from_be_bytes([data[offset + 2], data[offset + 3]]) as usize;
         offset += 4;

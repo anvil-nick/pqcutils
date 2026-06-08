@@ -1,7 +1,7 @@
 use rust_embed::RustEmbed;
 use tera::{Context, Tera};
 use std::fs::File;
-use chrono::prelude::*;
+use chrono::Utc;
 use std::path::Path;
 use crate::ReportResults;
 
@@ -22,7 +22,8 @@ pub fn generate_report(output_file: &Path, results: ReportResults) -> Result<(),
 
     log::debug!("Loading HTML templates");
     for template in templates {
-        let html_file = EmbeddedResources::get(template).unwrap();
+        let html_file = EmbeddedResources::get(template)
+            .ok_or_else(|| format!("Embedded template not found: {template}"))?;
         let html_data = std::str::from_utf8(html_file.data.as_ref())?;
         tera.add_raw_template(template, html_data)?;
     }
@@ -35,7 +36,7 @@ pub fn generate_report(output_file: &Path, results: ReportResults) -> Result<(),
     log::trace!("Tera Template: {:?}", ctx);
 
     log::debug!("Rendering HTML report to {}", output_file.display());
-    let f = File::create(&output_file)?;
+    let f = File::create(output_file)?;
     tera.render_to("template.html", &ctx, f)?;
     log::info!("HTML report written to {}", output_file.display());
 

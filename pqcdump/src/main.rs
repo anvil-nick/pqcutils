@@ -105,8 +105,7 @@ pub struct TlsCipherSuite {
 fn load_kex_algos() -> HashMap<String, KexAlgo> {
     let json_file = EmbeddedResources::get("kex_algos.json").unwrap();
     let json_data = std::str::from_utf8(json_file.data.as_ref()).unwrap();
-    let kex_algos = serde_json::from_str(&json_data).unwrap();
-    return kex_algos;
+    serde_json::from_str(&json_data).unwrap()
 }
 
 fn load_groups() -> HashMap<u16, TlsGroup> {
@@ -119,7 +118,7 @@ fn load_groups() -> HashMap<u16, TlsGroup> {
     let mut groups_by_id = HashMap::new();
 
     for (name, mut group) in groups_by_name {
-        group.name = name.clone();
+        group.name = name;
         groups_by_id.insert(group.group_id, group);
     }
 
@@ -195,7 +194,7 @@ fn main() {
         let mut pqc_supported = false;
         ssh_hosts_pqc_algos
             .entry(host.clone())
-            .or_insert_with(BTreeSet::<AlgorithmDetails>::new);
+            .or_default();
         for alg in caps.supported_kex() {
             log::info!("  {}", alg);
             if let Some(algo) =  kex_algos.get(alg) {
@@ -231,17 +230,17 @@ fn main() {
         } else {
             pqc_support = "No Support".to_string();
         }
-        ssh_hosts_pqc.insert(host.to_string(), pqc_support.to_string());
+        ssh_hosts_pqc.insert(host.to_string(), pqc_support);
     }
 
     log::info!("\n=== Negotiated Sessions ===");
     let mut ssh_pqc_supported_count = 0;
     for (flow, session) in &ssh_sessions {
         if let Some(neg) = &session.negotiated() {
-            let source_ip = flow.src().parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
-            let source_port = flow.src().parse::<SocketAddr>().expect("invalid socket address").port();
-            let destination_ip = flow.dst().parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
-            let destination_port = flow.dst().parse::<SocketAddr>().expect("invalid socket address").port();
+            let src: SocketAddr = flow.src().parse().expect("invalid socket address");
+            let (source_ip, source_port) = (src.ip().to_string(), src.port());
+            let dst: SocketAddr = flow.dst().parse().expect("invalid socket address");
+            let (destination_ip, destination_port) = (dst.ip().to_string(), dst.port());
             
             ssh_sessions_results.insert(source_ip.clone(), HashSet::<SessionResult>::new());
             log::info!("{} -> {} : {}", flow.src(), flow.dst(), neg.kex());
@@ -294,18 +293,12 @@ fn main() {
                 if let Some(cipher) = cipher_suites.get(id) {
                     log::info!("  {}", cipher.name);
                     if let Some(set) = tls_hosts_ciphers.get_mut(&source_ip) {
-                        set.insert(format!(
-                            "{}",
-                            cipher.name)
-                        );
+                        set.insert(cipher.name.clone());
                     }
                 } else {
                     log::info!("  {} -> UNKNOWN", id);
                     if let Some(set) = tls_hosts_ciphers.get_mut(&source_ip) {
-                        set.insert(format!(
-                            "{}",
-                            id)
-                        );
+                        set.insert(id.to_string());
                     }
                 }
             }
@@ -320,7 +313,7 @@ fn main() {
             let mut pqc_supported = false;
             tls_host_capabilities
                 .entry(source_ip.clone())
-                .or_insert_with(BTreeSet::<AlgorithmDetails>::new);
+                .or_default();
             for value in values {
                 if let Some(group) = groups.get(value) {
                     let description;
@@ -353,7 +346,7 @@ fn main() {
             } else {
                 pqc_support = "No Support".to_string();
             }
-            tls_hosts_pqc.insert(source_ip.to_string(), pqc_support.to_string());
+            tls_hosts_pqc.insert(source_ip.to_string(), pqc_support);
         }
     }
 
@@ -369,7 +362,7 @@ fn main() {
             let destination_port = key.dst_port;
             tls_sessions_results
                 .entry(source_ip.to_string())
-                .or_insert_with(HashSet::<SessionResult>::new);
+                .or_default();
             if let Some(group) = groups.get(value) {
                 log::info!("{} -> {}", key, group.name);
                 let description;
@@ -403,20 +396,20 @@ fn main() {
         total_count: hosts.len(),
         pqc_count: pqc_hosts.len(),
         ssh_total_count: ssh_sessions.len(),
-        ssh_pqc_supported_count: ssh_pqc_supported_count,
+        ssh_pqc_supported_count,
         tls_total_count: tls_sessions.len(),
-        tls_pqc_supported_count: tls_pqc_supported_count,
-        packet_count: packet_count,
+        tls_pqc_supported_count,
+        packet_count,
         start_time: start_time.unwrap_or(Utc::now()),
-        end_time: end_time,
+        end_time,
         ssh_host_capabilities: ssh_hosts_pqc_algos,
-        ssh_hosts: ssh_hosts,
-        ssh_hosts_pqc: ssh_hosts_pqc,
-        ssh_sessions_results: ssh_sessions_results,
-        tls_hosts: tls_hosts,
-        tls_hosts_pqc: tls_hosts_pqc,
-        tls_host_capabilities: tls_host_capabilities,
-        tls_sessions_results: tls_sessions_results,
+        ssh_hosts,
+        ssh_hosts_pqc,
+        ssh_sessions_results,
+        tls_hosts,
+        tls_hosts_pqc,
+        tls_host_capabilities,
+        tls_sessions_results,
     };
 
     if let Err(e) = report::generate_report(&args.output, results) {
@@ -522,9 +515,8 @@ fn process_packet(packet: &Packet,
             process_packet_helper(&sliced, &payload, sessions, ssh_host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
 
             // Try a reassembled packet
-            if let Some(data) = reassembler.push(key, tcp.sequence_number(), tcp.payload()) { 
-                let payload = &data; 
-                process_packet_helper(&sliced, &payload, sessions, ssh_host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
+            if let Some(data) = reassembler.push(key, tcp.sequence_number(), tcp.payload()) {
+                process_packet_helper(&sliced, &data, sessions, ssh_host_caps, &tcp, tls_ciphers, keyshare_groups, tls_sessions);
             }   
         }
     }	
