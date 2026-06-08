@@ -281,6 +281,7 @@ fn main() {
     let mut tls_host_capabilities = HashMap::<String, BTreeSet::<AlgorithmDetails>>::new();
     let mut tls_sessions_results = HashMap::<String, HashSet::<SessionResult>>::new();
 
+    
     if !tls_ciphers.is_empty() {
         log::info!("\n=== TLS CIPHERS Map ===");
         for (key, values) in &tls_ciphers {
@@ -350,8 +351,11 @@ fn main() {
         }
     }
 
+    for host in &tls_hosts {
+        tls_hosts_pqc.entry(host.clone()).or_insert_with(|| "TLS 1.2".to_string());
+    }
 
-    let mut tls_pqc_supported_count = 0; 
+    let mut tls_pqc_supported_count = 0;
     if !tls_sessions.is_empty() {
         log::info!("\n=== Negotiated TLS Sessions ===");
         for (key, value) in &tls_sessions {

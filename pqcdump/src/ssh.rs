@@ -58,6 +58,14 @@ impl HostCapabilities {
     }
 }
 
+fn format_socket_addr(ip: &str, port: u16) -> String {
+    if ip.contains(':') {
+        format!("[{}]:{}", ip, port)
+    } else {
+        format!("{}:{}", ip, port)
+    }
+}
+
 pub fn process_ssh(sliced: &SlicedPacket, payload: &[u8], sessions: &mut HashMap<FlowKey, SshSession>,
     host_caps: &mut HashMap<String, HostCapabilities>){
     let kex = match parse_ssh_kexinit(payload) {
@@ -83,8 +91,8 @@ pub fn process_ssh(sliced: &SlicedPacket, payload: &[u8], sessions: &mut HashMap
     };
 
     let flow = FlowKey {
-        src: format!("{}:{}", src_ip, tcp.source_port()),
-        dst: format!("{}:{}", dst_ip, tcp.destination_port()),
+        src: format_socket_addr(&src_ip, tcp.source_port()),
+        dst: format_socket_addr(&dst_ip, tcp.destination_port()),
     };
 
     let reverse_flow = FlowKey {

@@ -66,7 +66,7 @@ pub fn process_ssl_hello(sliced: &SlicedPacket<'_>,
 
         match parse_server_hello_v3(payload){
             Ok(result) => {
-                tls_sessions.insert(session_key.expect("Key pasrsing failed"), result.keyshare);
+                tls_sessions.insert(session_key.expect("Key parsing failed"), result.keyshare);
                 keyshare_groups
                     .entry(key.clone())
                     .or_default()
