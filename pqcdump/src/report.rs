@@ -32,6 +32,7 @@ pub fn generate_report(output_file: &Path, results: ReportResults) -> Result<(),
 
     let dt = Utc::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
     ctx.insert("title", &dt);
+    ctx.insert("PQC_SUPPORTED", &crate::PQC_SUPPORTED);
 
     log::trace!("Tera Template: {:?}", ctx);
 

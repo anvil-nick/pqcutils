@@ -111,11 +111,11 @@ pub fn process_ssh(sliced: &SlicedPacket, payload: &[u8], sessions: &mut HashMap
     };
 
     if is_forward && session.client_kexinit.is_none() {
-        session.client_kexinit = Some(kex.clone());
         update_host_caps(host_caps, &src_ip, &kex);
+        session.client_kexinit = Some(kex);
     } else if !is_forward && session.server_kexinit.is_none() {
-        session.server_kexinit = Some(kex.clone());
         update_host_caps(host_caps, &src_ip, &kex);
+        session.server_kexinit = Some(kex);
     }
 
     if session.negotiated.is_none() {
@@ -148,8 +148,10 @@ fn update_host_caps(
     }
 }
 
+pub const SSH_MSG_KEXINIT: u8 = 20;
+
 fn parse_ssh_kexinit(payload: &[u8]) -> Option<KexInit> {
-    if payload.len() < 6 || payload[5] != 20 {
+    if payload.len() < 6 || payload[5] != SSH_MSG_KEXINIT {
         return None;
     }
 

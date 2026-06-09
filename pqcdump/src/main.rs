@@ -16,6 +16,8 @@ mod tls;
 mod tcp;
 mod report;
 
+pub const PQC_SUPPORTED: &str = "PQC Supported";
+
 #[derive(Parser, Debug)]
 #[command(
     name = "pqcdump",
@@ -158,19 +160,18 @@ fn main() {
 	let mut tls_sessions: HashMap<TlsSessionKey, u16> = HashMap::new();
     let mut reassembler = TcpReassembler::new();
 
-    let mut packet_count = 1;
+    let mut packet_count = 0;
     let mut start_time: Option<DateTime<Utc>> = None;
     let mut end_time: DateTime<Utc> = Utc::now();
 
-    
+
     while let Ok(packet) = cap.next_packet() {
+        packet_count += 1;
         log::debug!("{}", packet_count);
         process_packet(&packet,  &mut reassembler, &mut ssh_sessions, &mut host_caps, &mut tls_ciphers, &mut keyshare_groups, &mut tls_sessions);
-        packet_count += 1;
-        if start_time.is_none(){
-            start_time = Some(Utc.timestamp_opt(packet.header.ts.tv_sec.into(), (packet.header.ts.tv_usec * 1000).try_into().unwrap()).unwrap());
-        }
-        end_time = Utc.timestamp_opt(packet.header.ts.tv_sec.into(), (packet.header.ts.tv_usec * 1000).try_into().unwrap()).unwrap();
+        let ts = Utc.timestamp_opt(packet.header.ts.tv_sec.into(), (packet.header.ts.tv_usec * 1000).try_into().unwrap()).unwrap();
+        if start_time.is_none() { start_time = Some(ts); }
+        end_time = ts;
     }
 
     let kex_algos = load_kex_algos();
@@ -206,7 +207,7 @@ fn main() {
                     if algo.hybrid.unwrap_or(false) {
                         description = "Hybrid"
                     } else if algo.pqc {
-                        description = "PQC Supported";
+                        description = PQC_SUPPORTED;
                     } else {
                         description = "Not PQC Safe";
                     }
@@ -225,7 +226,7 @@ fn main() {
         }
         let pqc_support;
         if pqc_supported {
-            pqc_support = "PQC Supported".to_string();
+            pqc_support = PQC_SUPPORTED.to_string();
             pqc_hosts.insert(host.to_string());
         } else {
             pqc_support = "No Support".to_string();
@@ -242,15 +243,15 @@ fn main() {
             let dst: SocketAddr = flow.dst().parse().expect("invalid socket address");
             let (destination_ip, destination_port) = (dst.ip().to_string(), dst.port());
             
-            ssh_sessions_results.insert(source_ip.clone(), HashSet::<SessionResult>::new());
+            ssh_sessions_results.entry(source_ip.clone()).or_default();
             log::info!("{} -> {} : {}", flow.src(), flow.dst(), neg.kex());
             if let Some(algo) =  kex_algos.get(neg.kex()) {
                 log::info!("{} {}", neg.kex(), algo.pqc);
                 let description;
                 if algo.pqc {
-                    log::info!("PQC Supported");
+                    log::info!("{}", PQC_SUPPORTED);
                     ssh_pqc_supported_count += 1;
-                    description = "PQC Supported";
+                    description = PQC_SUPPORTED;
                 } else if algo.hybrid.unwrap_or(false) {
                     log::info!("Hybrid");
                     description = "Hybrid";
@@ -289,18 +290,14 @@ fn main() {
             
             let source_ip = key.parse::<SocketAddr>().expect("invalid socket address").ip().to_string();
             tls_hosts.insert(source_ip.to_string());
-            tls_hosts_ciphers.insert(source_ip.clone(), BTreeSet::<String>::new());
+            let cipher_set = tls_hosts_ciphers.entry(source_ip.clone()).or_default();
             for id in values {
                 if let Some(cipher) = cipher_suites.get(id) {
                     log::info!("  {}", cipher.name);
-                    if let Some(set) = tls_hosts_ciphers.get_mut(&source_ip) {
-                        set.insert(cipher.name.clone());
-                    }
+                    cipher_set.insert(cipher.name.clone());
                 } else {
                     log::info!("  {} -> UNKNOWN", id);
-                    if let Some(set) = tls_hosts_ciphers.get_mut(&source_ip) {
-                        set.insert(id.to_string());
-                    }
+                    cipher_set.insert(id.to_string());
                 }
             }
         }
@@ -342,7 +339,7 @@ fn main() {
             
             let pqc_support;
             if pqc_supported {
-                pqc_support = "PQC Supported".to_string();
+                pqc_support = PQC_SUPPORTED.to_string();
                 pqc_hosts.insert(source_ip.to_string());
             } else {
                 pqc_support = "No Support".to_string();
@@ -538,7 +535,7 @@ fn process_packet_helper(sliced: &SlicedPacket,
         tls_ciphers: &mut HashMap<String, HashSet<u16>>, 
         keyshare_groups: &mut HashMap<String, HashSet<u16>>,
         tls_sessions: &mut HashMap<TlsSessionKey, u16>){
-    if payload[5] == 20 {
+    if payload[5] == ssh::SSH_MSG_KEXINIT {
         log::debug!("This may be an SSH_MSG_KEXINIT message");
         ssh::process_ssh(&sliced, &payload, ssh_sessions, ssh_host_capabilities);
     }

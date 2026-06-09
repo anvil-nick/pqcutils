@@ -54,9 +54,7 @@ pub struct TcpReassembler {
 
 impl TcpReassembler {
     pub fn new() -> Self {
-        Self {
-            flows: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn push(
@@ -69,7 +67,7 @@ impl TcpReassembler {
         let stream = self
             .flows
             .entry(key)
-            .or_insert(TcpJoiner::new(seq));
+            .or_insert_with(|| TcpJoiner::new(seq));
 
         stream.push(seq, payload)
     }
