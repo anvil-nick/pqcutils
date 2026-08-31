@@ -145,7 +145,7 @@ fn load_cipher_suites() -> HashMap<u16, TlsCipherSuite> {
 }
 
 fn main() {
-
+    env_logger::init();
     
     let args = Args::parse();
 
