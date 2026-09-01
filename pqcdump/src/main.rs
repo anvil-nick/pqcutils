@@ -151,7 +151,13 @@ fn main() {
 
     let file_path = &args.pcap;
 
-    let mut cap = Capture::from_file(file_path).expect("Failed to open pcap file");
+    let mut cap = match Capture::from_file(file_path) {
+        Ok(cap) => cap,
+        Err(e) => {
+            eprintln!("Failed to open pcap file '{}': {}", file_path.display(), e);
+            std::process::exit(1);
+        }
+    };
     let linktype = cap.get_datalink();
     if linktype == Linktype::LINUX_SLL2 {
         eprintln!("Unsupported link type: Linux cooked capture v2 (SLL2) is not supported");
