@@ -16,7 +16,7 @@ Regarding supported algorithms:
 
 ## Bugs, comments, suggestions
 
-The code should be somewhat idiomatic Rust, but there will be plenty of ways to improve it. All input is welcome — send pull requests or file bugs/issues via GitHub. You are also welcome to directly email the principal author and maintainer, Vincent Berg, at *gvb@anvilsecure.com*.
+The code should be somewhat idiomatic Rust, but there will be plenty of ways to improve it. All input is welcome — send pull requests or file bugs/issues via GitHub. You are also welcome to directly email the principal author and maintainer, Nicholas O'Shea, at *nicholas.oshea@anvilsecure.com*.
 
 # Installation
 

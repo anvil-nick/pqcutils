@@ -53,4 +53,4 @@ BSD — see [LICENSE](LICENSE).
 
 ## Contact
 
-All input is welcome via GitHub issues and pull requests. You can also email the principal author and maintainer, Vincent Berg, at *gvb@anvilsecure.com*.
+All input is welcome via GitHub issues and pull requests. You can also email the principal authors and maintainer, Vincent Berg, at *gvb@anvilsecure.com* and Nicholas O'Shea at *nicholas.oshea@anvilsecure.com*.
