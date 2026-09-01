@@ -1,4 +1,4 @@
-use pcap::{Capture, Packet};
+use pcap::{Capture, Linktype, Packet};
 use etherparse::{SlicedPacket, TransportSlice};
 use std::net::SocketAddr;
 use std::collections::{BTreeSet, HashSet};
@@ -152,7 +152,12 @@ fn main() {
     let file_path = &args.pcap;
 
     let mut cap = Capture::from_file(file_path).expect("Failed to open pcap file");
-    
+    let linktype = cap.get_datalink();
+    if linktype == Linktype::LINUX_SLL2 {
+        eprintln!("Unsupported link type: Linux cooked capture v2 (SLL2) is not supported");
+        std::process::exit(1);
+    }
+
     let mut ssh_sessions: HashMap<FlowKey, SshSession> = HashMap::new();
     let mut host_caps: HashMap<String, HostCapabilities> = HashMap::new();
     let mut tls_ciphers: HashMap<String, HashSet<u16>> = HashMap::new();
@@ -168,7 +173,7 @@ fn main() {
     while let Ok(packet) = cap.next_packet() {
         packet_count += 1;
         log::debug!("{}", packet_count);
-        process_packet(&packet,  &mut reassembler, &mut ssh_sessions, &mut host_caps, &mut tls_ciphers, &mut keyshare_groups, &mut tls_sessions);
+        process_packet(&packet, linktype, &mut reassembler, &mut ssh_sessions, &mut host_caps, &mut tls_ciphers, &mut keyshare_groups, &mut tls_sessions);
         let ts = Utc.timestamp_opt(packet.header.ts.tv_sec.into(), (packet.header.ts.tv_usec * 1000).try_into().unwrap()).unwrap();
         if start_time.is_none() { start_time = Some(ts); }
         end_time = ts;
@@ -474,13 +479,18 @@ impl AlgorithmDetails {
 }
 
 fn process_packet(packet: &Packet,
+    linktype: Linktype,
     reassembler: &mut TcpReassembler,
     sessions: &mut HashMap<FlowKey, SshSession>,
     ssh_host_caps: &mut HashMap<String, HostCapabilities>,
     tls_ciphers: &mut HashMap<String, HashSet<u16>>,
     keyshare_groups: &mut HashMap<String, HashSet<u16>>,
     tls_sessions: &mut HashMap<TlsSessionKey, u16>) {
-    match SlicedPacket::from_ethernet(&packet) {
+    let sliced_result = match linktype {
+        Linktype::LINUX_SLL => SlicedPacket::from_linux_sll(&packet),
+        _ => SlicedPacket::from_ethernet(&packet),
+    };
+    match sliced_result {
 	    Err(sliced) => log::debug!("Err {:?}", sliced),
 	    Ok(sliced) => {
 			log::debug!("link: {:?}", sliced.link);
